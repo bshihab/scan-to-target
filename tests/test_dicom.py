@@ -14,7 +14,7 @@ from s2t import transforms as T
 
 def write_series(folder: Path, vol: np.ndarray, r, c, dr, dc, origin, slice_vec,
                  n_t=1, shuffle=True, slopes=None, ipp_jitter=None, iop_override=None,
-                 drop=None, extra_files=True):
+                 drop=None, extra_files=True, echoes=None):
     """Write vol[i, j, k(, t)] (i = column, j = row) as one file per slice per time point."""
     folder.mkdir(parents=True, exist_ok=True)
     series_uid = generate_uid()
@@ -42,6 +42,9 @@ def write_series(folder: Path, vol: np.ndarray, r, c, dr, dc, origin, slice_vec,
         ds.PatientName = "Secret^Person"
         ds.PatientID = "MRN-0001"
         ds.InstanceNumber = 1 + t * nz + k
+        if echoes is not None:
+            ds.EchoNumbers = echoes[t]
+            ds.ImageType = ["ORIGINAL", "PRIMARY", "M"]
         ds.Rows, ds.Columns = vol.shape[1], vol.shape[0]
         ds.PixelSpacing = [dr, dc]
         ds.SliceThickness = float(np.linalg.norm(slice_vec))
@@ -168,3 +171,13 @@ def test_two_series_in_one_folder_needs_uid(tmp_path):
         dicom.load_series(tmp_path)
     v = dicom.load_series(tmp_path, series_uid=uid_b)
     assert v.data.max() == 2
+
+
+def test_two_echoes_are_not_time_points(tmp_path):
+    rng = np.random.default_rng(5)
+    vol = rng.integers(0, 1000, size=(6, 6, 4, 2)).astype(np.float32)
+    write_series(tmp_path, vol, np.eye(3)[0], np.eye(3)[1], 1, 1, [0, 0, 0], [0, 0, 2], n_t=2, echoes=[1, 2])
+    with pytest.raises(dicom.DicomGeometryError, match="mixes 2 kinds"):
+        dicom.load_series(tmp_path)
+    v = dicom.load_series(tmp_path, echo=2)
+    assert v.data.shape == (6, 6, 4) and np.array_equal(v.data, vol[..., 1])

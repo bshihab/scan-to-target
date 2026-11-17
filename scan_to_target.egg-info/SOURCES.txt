@@ -3,6 +3,7 @@ pyproject.toml
 s2t/__init__.py
 s2t/cli.py
 s2t/dicom.py
+s2t/dicomweb.py
 s2t/fiducials.py
 s2t/fmri.py
 s2t/glm.py
@@ -11,8 +12,13 @@ s2t/register.py
 s2t/robot.py
 s2t/scene.py
 s2t/serve.py
+s2t/template.py
 s2t/transforms.py
 s2t/volume.py
+s2t/viewer/app.js
+s2t/viewer/geometry.js
+s2t/viewer/index.html
+s2t/viewer/style.css
 scan_to_target.egg-info/PKG-INFO
 scan_to_target.egg-info/SOURCES.txt
 scan_to_target.egg-info/dependency_links.txt
@@ -20,6 +26,8 @@ scan_to_target.egg-info/entry_points.txt
 scan_to_target.egg-info/requires.txt
 scan_to_target.egg-info/top_level.txt
 tests/test_dicom.py
+tests/test_dicomweb.py
 tests/test_fiducials.py
 tests/test_glm.py
 tests/test_plan_server.py
+tests/test_viewer.py

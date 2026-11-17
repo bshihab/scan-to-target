@@ -23,6 +23,7 @@ from s2t import fmri, glm  # noqa: E402
 from s2t.volume import Volume, resample_to  # noqa: E402
 
 DATA = ROOT / "data/ds000114"
+NOISE = "ols" if "--ols" in sys.argv else "ar1"
 
 
 def realigned(bold, mats, drop):
@@ -50,7 +51,7 @@ def run(ses, sub="sub-01"):
     design = glm.design_matrix(n, tr, events, confounds=params,
                                confound_names=["rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z"])
     c = glm.contrast_vector(design, fmri.FINGER_CONTRAST)
-    ours, _ = glm.fit_t(rv, design, c, mask, smooth_fwhm_mm=0)
+    ours, _ = glm.fit_t(rv, design, c, mask, smooth_fwhm_mm=0, noise_model=NOISE)
 
     img = nib.Nifti1Image(rv.data, rv.affine)
     mimg = nib.Nifti1Image(mask.astype(np.uint8), rv.affine)
@@ -59,7 +60,7 @@ def run(ses, sub="sub-01"):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         flm = FirstLevelModel(t_r=tr, slice_time_ref=0.0, hrf_model="spm", drift_model="cosine",
-                              high_pass=1.0 / 128, noise_model="ols", mask_img=mimg, smoothing_fwhm=None,
+                              high_pass=1.0 / 128, noise_model=NOISE, mask_img=mimg, smoothing_fwhm=None,
                               signal_scaling=False, minimize_memory=False)
         flm.fit(img, events=ev, confounds=conf)
         theirs = flm.compute_contrast("Finger - 0.5*Foot - 0.5*Lips", stat_type="t", output_type="stat").get_fdata()
@@ -68,7 +69,7 @@ def run(ses, sub="sub-01"):
     r = float(np.corrcoef(a, b)[0, 1])
     pa = np.unravel_index(int(np.argmax(np.where(mask, ours.data, -np.inf))), mask.shape)
     pb = np.unravel_index(int(np.argmax(np.where(mask, theirs, -np.inf))), mask.shape)
-    res = {"session": ses, "n_scans": n, "dropped_volumes": drop, "pearson_r": r,
+    res = {"session": ses, "noise_model": NOISE, "n_scans": n, "dropped_volumes": drop, "pearson_r": r,
            "max_abs_t_diff": float(np.abs(a - b).max()), "peak_ours": [int(x) for x in pa],
            "peak_nilearn": [int(x) for x in pb], "peak_t_ours": float(ours.data[pa]), "peak_t_nilearn": float(theirs[pb]),
            "n_vox_t_gt_3_1_ours": int((a > 3.1).sum()), "n_vox_t_gt_3_1_nilearn": int((b > 3.1).sum()),
@@ -77,10 +78,10 @@ def run(ses, sub="sub-01"):
 
 
 def main():
-    sessions = sys.argv[1:] or ["test", "retest"]
+    sessions = [a for a in sys.argv[1:] if not a.startswith("--")] or ["test", "retest"]
     rows = [run(s) for s in sessions]
     (ROOT / "out").mkdir(exist_ok=True)
-    (ROOT / "out/b3.json").write_text(json.dumps(rows, indent=2))
+    (ROOT / f"out/b3_{NOISE}.json").write_text(json.dumps(rows, indent=2))
     print(json.dumps(rows, indent=2))
     return 0 if all(r["passed"] for r in rows) else 1
 

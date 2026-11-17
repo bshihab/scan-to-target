@@ -31,7 +31,9 @@ from .volume import Volume
 
 # Only these header fields are copied into Volume.meta. Patient name, ID,
 # birth date, accession number and so on never leave this module.
-SAFE_META = ("Modality", "Manufacturer", "SeriesDescription", "SeriesNumber",
+# SeriesDescription is free text typed at the scanner and sometimes holds names
+# or record numbers, so it is left out too.
+SAFE_META = ("Modality", "Manufacturer", "SeriesNumber",
              "MagneticFieldStrength", "RepetitionTime", "EchoTime", "SliceThickness",
              "SpacingBetweenSlices", "SOPClassUID")
 
@@ -72,7 +74,20 @@ def find_series(folder) -> dict[str, list[Path]]:
     return dict(groups)
 
 
-def load_series(source, series_uid: str | None = None) -> Volume:
+def _kind(ds: Dataset) -> tuple:
+    """What a file is, apart from where and when: echo number and image type.
+    Two echoes, or magnitude and phase, can share one SeriesInstanceUID; they
+    must not be mistaken for time points."""
+    echo = ds.get("EchoNumbers")
+    # Only the first three ImageType values are defined across vendors (value 3
+    # tells magnitude M from phase P on Siemens MR, AXIAL from LOCALIZER on CT);
+    # later values are vendor-specific (GE CT adds "ADD" to some slices).
+    it = tuple(str(x).upper() for x in (ds.get("ImageType") or [])[:3])
+    return (int(echo) if echo not in (None, "") else None, it)
+
+
+def load_series(source, series_uid: str | None = None, echo: int | None = None,
+                image_type: str | None = None) -> Volume:
     """Load one series from a folder or a list of files.
 
     Returns a Volume whose matrix maps voxels to scanner RAS (the NIfTI
@@ -96,6 +111,16 @@ def load_series(source, series_uid: str | None = None) -> Volume:
     uids = {str(f.ds.SeriesInstanceUID) for f in files}
     if len(uids) != 1:
         raise DicomGeometryError(f"files belong to {len(uids)} different series")
+    if echo is not None:
+        files = [f for f in files if _kind(f.ds)[0] == echo]
+    if image_type is not None:
+        files = [f for f in files if image_type.upper() in _kind(f.ds)[1]]
+    if not files:
+        raise DicomGeometryError("no files match the requested echo / image type")
+    kinds = sorted({_kind(f.ds) for f in files}, key=str)
+    if len(kinds) > 1:
+        desc = "; ".join(f"echo {e}, {'/'.join(t) or 'no ImageType'}" for e, t in kinds)
+        raise DicomGeometryError(f"series mixes {len(kinds)} kinds of image ({desc}): choose one with echo= or image_type=")
 
     for f in files:
         for tag in ("ImageOrientationPatient", "ImagePositionPatient", "PixelSpacing", "Rows", "Columns"):

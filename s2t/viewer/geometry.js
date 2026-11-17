@@ -115,3 +115,45 @@ export function angleDeg(a, b) {
   const c = Math.max(-1, Math.min(1, dot(unit(a), unit(b))));
   return (Math.acos(c) * 180) / Math.PI;
 }
+
+// Render one plane to RGBA. Pixel (px, py) shows the world point at its centre
+// (px + 0.5, py + 0.5), the same convention clicks use, so what you click is
+// what was drawn. t1: {data, shape, inv} (inv = world -> T1 voxel);
+// ov (optional): {data, shape, world_to_voxel}; overlay drawn where t > thr.
+export function renderPlane(out, RES, plane, t1, ov, thr) {
+  const { basis, center, mmPerPx } = plane;
+  const o = pixelToWorld(0.5, 0.5, RES, RES, center, basis, mmPerPx);
+  const U = scale(basis.u, mmPerPx), V = scale(basis.v, -mmPerPx);
+  const linDir = (M, d) => [M[0][0] * d[0] + M[0][1] * d[1] + M[0][2] * d[2], M[1][0] * d[0] + M[1][1] * d[1] + M[1][2] * d[2], M[2][0] * d[0] + M[2][1] * d[1] + M[2][2] * d[2]];
+  const t0 = apply(t1.inv, o), tu = linDir(t1.inv, U), tv = linDir(t1.inv, V);
+  let q0, qu, qv;
+  if (ov) { const W = ov.world_to_voxel; q0 = apply(W, o); qu = linDir(W, U); qv = linDir(W, V); }
+  for (let py = 0; py < RES; py++) {
+    for (let px = 0; px < RES; px++) {
+      let g = trilinear(t1.data, t1.shape, t0[0] + px * tu[0] + py * tv[0], t0[1] + px * tu[1] + py * tv[1], t0[2] + px * tu[2] + py * tv[2]);
+      if (Number.isNaN(g)) g = 0;
+      let r = g, gg = g, b = g;
+      if (ov) {
+        const t = trilinear(ov.data, ov.shape, q0[0] + px * qu[0] + py * qv[0], q0[1] + px * qu[1] + py * qv[1], q0[2] + px * qu[2] + py * qv[2]);
+        if (t > thr) {
+          const f = Math.min(1, (t - thr) / 5), a = 0.75;
+          r = (1 - a) * g + a * 255; gg = (1 - a) * g + a * (60 + 195 * f); b = (1 - a) * g + a * 20 * f;
+        }
+      }
+      const p = 4 * (py * RES + px);
+      out[p] = r; out[p + 1] = gg; out[p + 2] = b; out[p + 3] = 255;
+    }
+  }
+  return out;
+}
+
+// Screen-edge letters for a display basis: [top, bottom, left, right].
+const LETTERS = [["R", "L"], ["A", "P"], ["S", "I"]];
+export function letter(vec) {
+  let ax = 0;
+  for (let a = 1; a < 3; a++) if (Math.abs(vec[a]) > Math.abs(vec[ax])) ax = a;
+  return (Math.abs(vec[ax]) < 0.95 ? "~" : "") + LETTERS[ax][vec[ax] >= 0 ? 0 : 1];
+}
+export function edgeLetters(basis) {
+  return [letter(basis.v), letter(scale(basis.v, -1)), letter(scale(basis.u, -1)), letter(basis.u)];
+}

@@ -55,6 +55,7 @@ FIDUCIAL_DIRECTIONS = [(0, 1, 0.35), (1, 0.2, 0.45), (-1, 0.2, 0.45), (0, -1, 0.
 
 
 def build(t1_path, mean_epi_path, tmap_path, epi_to_t1: np.ndarray, out_dir, title: str, t1_to_mni=None,
+          overlay_label: str = "t-map",
           extra_inputs: dict | None = None, fiducial_sigma_mm: float = 0.25, seed: int = 0) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -83,10 +84,13 @@ def build(t1_path, mean_epi_path, tmap_path, epi_to_t1: np.ndarray, out_dir, tit
     scene = {
         "schema": "scan-to-target/scene/1",
         "title": title,
+        # "affine" maps voxels of the CROPPED display volume in t1.u8.gz; voxel
+        # indices in the original NIfTI use "affine_original" (crop offset below)
         "t1": {"file": "t1.u8.gz", "dtype": "uint8", "shape": [int(x) for x in u8.shape], "affine": A.tolist(),
-               "window": [float(w0), float(w1)], "order": "C"},
+               "affine_original": t1.affine.tolist(), "shape_original": [int(x) for x in t1.shape3],
+               "crop_offset_voxels": [int(x) for x in lo], "window": [float(w0), float(w1)], "order": "C"},
         "overlay": {"file": "overlay.f32.gz", "dtype": "float32", "shape": [int(x) for x in tmap.shape3],
-                    "label": "finger movement vs rest, t", "short_label": "t (finger)",
+                    "label": overlay_label, "short_label": "t",
                     "affine_epi": tmap.affine.tolist(), "epi_to_t1": epi_to_t1.tolist(),
                     # T1 world -> EPI world -> EPI voxel
                     "world_to_voxel": (np.linalg.inv(tmap.affine) @ np.linalg.inv(epi_to_t1)).tolist()},

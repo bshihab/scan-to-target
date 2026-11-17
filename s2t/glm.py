@@ -83,22 +83,60 @@ def contrast_vector(design: Design, spec: dict) -> np.ndarray:
     return c
 
 
-def fit_t(bold: Volume, design: Design, contrast: np.ndarray, mask: np.ndarray,
-          smooth_fwhm_mm: float = 0.0) -> tuple[Volume, dict]:
-    """OLS fit inside `mask`; returns the t-map as a Volume and fit stats."""
-    data = bold.data
-    if smooth_fwhm_mm > 0:
-        sig = smooth_fwhm_mm / 2.3548 / bold.spacing[:3]
-        data = np.stack([ndimage.gaussian_filter(data[..., t], sig) for t in range(data.shape[3])], 3)
-    Y = data[mask].T.astype(np.float64)          # (n_scans, n_voxels)
-    X = design.X
+def _t_ols(X, Y, contrast):
     XtX_inv = np.linalg.pinv(X.T @ X)
     B = XtX_inv @ X.T @ Y
     resid = Y - X @ B
     dof = X.shape[0] - np.linalg.matrix_rank(X)
     sigma2 = (resid ** 2).sum(0) / dof
     var_c = float(contrast @ XtX_inv @ contrast)
-    t = (contrast @ B) / np.sqrt(sigma2 * var_c + 1e-30)
+    return (contrast @ B) / np.sqrt(sigma2 * var_c + 1e-30), resid, dof
+
+
+def ar1_coefficients(resid: np.ndarray, bins: int = 100) -> np.ndarray:
+    """Lag-1 autocorrelation of each voxel's OLS residuals (Yule-Walker),
+    truncated to 1/bins steps, as nilearn does so that voxels with the same
+    coefficient can share one whitened fit."""
+    n = resid.shape[0]
+    y = resid - resid.mean()
+    r0 = (y * y).sum(0) / (n * n)
+    r1 = (y[1:] * y[:-1]).sum(0) / ((n - 1) * n)
+    rho = r1 / np.maximum(r0, 1e-30)
+    return (rho * bins).astype(int) / bins
+
+
+def ar1_whiten(A: np.ndarray, rho: float) -> np.ndarray:
+    """Row t becomes A[t] - rho A[t-1]; the first row is kept."""
+    W = np.array(A, dtype=np.float64, copy=True)
+    W[1:] = W[1:] - rho * np.asarray(A, np.float64)[:-1]
+    return W
+
+
+def fit_t(bold: Volume, design: Design, contrast: np.ndarray, mask: np.ndarray,
+          smooth_fwhm_mm: float = 0.0, noise_model: str = "ar1") -> tuple[Volume, dict]:
+    """Fit inside `mask`; returns the t-map as a Volume and fit stats.
+
+    noise_model "ols": ordinary least squares. "ar1" (default, as in nilearn
+    and SPM): fMRI noise is autocorrelated, which makes OLS t-values too large;
+    the residuals' lag-1 autocorrelation is estimated per voxel and data and
+    design are prewhitened before refitting."""
+    data = bold.data
+    if smooth_fwhm_mm > 0:
+        sig = smooth_fwhm_mm / 2.3548 / bold.spacing[:3]
+        data = np.stack([ndimage.gaussian_filter(data[..., t], sig) for t in range(data.shape[3])], 3)
+    Y = data[mask].T.astype(np.float64)          # (n_scans, n_voxels)
+    X = design.X
+    t, resid, dof = _t_ols(X, Y, contrast)
+    stats = {"dof": int(dof), "noise_model": noise_model}
+    if noise_model == "ar1":
+        rho = ar1_coefficients(resid)
+        t = np.empty(Y.shape[1])
+        for r in np.unique(rho):
+            idx = rho == r
+            t[idx], _, _ = _t_ols(ar1_whiten(X, r), ar1_whiten(Y[:, idx], r), contrast)
+        stats.update({"ar1_median": float(np.median(rho)), "ar1_p95": float(np.percentile(rho, 95))})
+    elif noise_model != "ols":
+        raise ValueError(noise_model)
     out = np.zeros(bold.shape3, np.float32)
     out[mask] = t
-    return Volume(out, bold.affine.copy(), {"kind": "t-map", "dof": int(dof)}), {"dof": int(dof)}
+    return Volume(out, bold.affine.copy(), {"kind": "t-map", "dof": int(dof), "noise_model": noise_model}), stats

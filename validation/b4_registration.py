@@ -14,7 +14,9 @@ session is registered to that session's T1 by ours and by SimpleITK (Mattes
 MI, 3 levels, gradient descent with physical-shift scaling). Neither is ground
 truth. Bar: the two agree within 2.0 mm at every sphere point.
 
-Usage: python validation/b4_registration.py [a|b]   (default both; writes out/b4a.json, out/b4b.json)
+B4a-d adds susceptibility-like distortion and dropout to the pseudo-EPI (PLAN.md).
+
+Usage: python validation/b4_registration.py [a|b|d]   (default a and b; writes out/b4a.json, out/b4b.json, out/b4a_distorted.json)
 """
 import json
 import sys
@@ -70,7 +72,37 @@ def pseudo_epi(t1: Volume, grid: Volume, Tk: np.ndarray, rng) -> Volume:
     return Volume(arr.astype(np.float32), grid.affine.copy())
 
 
-def part_a(n=30, seed=11):
+def distorted_pseudo_epi(t1: Volume, grid: Volume, Tk: np.ndarray, rng, mni: np.ndarray) -> Volume:
+    """Pseudo-EPI with susceptibility-like distortion and dropout (bar B4a-d).
+    Regions are placed with the T1-to-MNI matrix: orbitofrontal cortex near
+    MNI (0, 35, -20), temporal poles near (+-40, 15, -35)."""
+    hm = head_mask(t1)
+    hi = np.percentile(t1.data[hm], 99)
+    inv = np.where(hm, np.clip(1.15 * hi - t1.data, 0, None), 0).astype(np.float32)
+    inv = (inv / max(inv.max(), 1e-6)) ** 0.7 * 1000.0
+    to_t1 = np.linalg.inv(mni)
+    centres = [(T.apply(to_t1, [0, 35, -20]), 4.0), (T.apply(to_t1, [40, 15, -35]), 2.5), (T.apply(to_t1, [-40, 15, -35]), 2.5)]
+    ijk = np.indices(grid.shape3).reshape(3, -1).T.astype(float)
+    world = grid.voxel_to_world(ijk)                      # pseudo-EPI world
+    t1_world = T.apply(np.linalg.inv(Tk), world)          # the same anatomy in T1 world
+    pe = grid.affine[:3, 1] / np.linalg.norm(grid.affine[:3, 1])  # phase-encode axis = EPI j axis
+    shift = np.zeros(len(world))
+    drop = np.ones(len(world))
+    for c, amp in centres:
+        g = np.exp(-np.sum((t1_world - c) ** 2, 1) / (2 * 18.0 ** 2))
+        shift += amp * g
+        drop *= 1 - 0.7 * g
+    src = t1_world + shift[:, None] * pe                  # each EPI voxel shows tissue displaced along PE
+    vox = T.apply(np.linalg.inv(t1.affine), src)
+    vals = ndimage.map_coordinates(inv, vox.T, order=1, cval=0.0) * drop
+    arr = vals.reshape(grid.shape3)
+    sig = 6.0 / 2.3548 / grid.spacing[:3]
+    arr = ndimage.gaussian_filter(arr, sig)
+    arr = arr + rng.normal(0, 0.03 * arr.max(), arr.shape)
+    return Volume(arr.astype(np.float32), grid.affine.copy())
+
+
+def part_a(n=30, seed=11, distorted=False):
     t1 = Volume.from_nifti(t1_path("test"))
     grid = Volume.from_nifti(bold_path("test")).frame(1)
     c = brain_center(t1)
@@ -81,7 +113,7 @@ def part_a(n=30, seed=11):
     t0 = time.time()
     for k in range(n):
         Tk = T.random_rigid(rng, 10.0, 15.0, c)
-        pe = pseudo_epi(t1, grid, Tk, rng)
+        pe = distorted_pseudo_epi(t1, grid, Tk, rng, t1_to_mni("test", t1)) if distorted else pseudo_epi(t1, grid, Tk, rng)
         M = register_epi_to_t1_bbr(t1, pe, brain).matrix
         err = T.transform_error_mm(M, np.linalg.inv(Tk), pts)
         rows.append({"true_deg": T.rotation_angle_deg(Tk), "true_mm": float(np.linalg.norm(Tk[:3, 3])),
@@ -198,6 +230,11 @@ def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "ab"
     ok = True
     (ROOT / "out").mkdir(exist_ok=True)
+    if which == "d":
+        a = part_a(distorted=True)
+        (ROOT / "out/b4a_distorted.json").write_text(json.dumps(a, indent=2))
+        print("B4a-d", json.dumps(a["summary"]))
+        return 0 if a["summary"]["passed"] else 1
     if "a" in which:
         a = part_a()
         (ROOT / "out/b4a.json").write_text(json.dumps(a, indent=2))

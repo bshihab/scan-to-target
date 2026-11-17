@@ -34,6 +34,7 @@ async function init() {
   if (scene.overlay) {
     state.ov = { ...scene.overlay, data: await loadArray(base + scene.overlay.file, "float32") };
     $("rOvLabel").textContent = scene.overlay.short_label || "t";
+    $("ovLabel").textContent = scene.overlay.label;
   }
   state.center = scene.head_center_ras.slice();
   state.cursor = (scene.peak_ras || scene.head_center_ras).slice();
@@ -85,46 +86,9 @@ function drawView(v) {
     return;
   }
   v.plane = pl;
-  const { basis, center, mmPerPx } = pl;
-  // world(px, py) = o + px*U + py*V, all affine, so voxel coordinates step linearly too
-  const o = G.pixelToWorld(0, 0, RES, RES, center, basis, mmPerPx);
-  const U = G.scale(basis.u, mmPerPx), V = G.scale(basis.v, -mmPerPx);
-  const t1 = state.t1, A = t1.inv;
-  const lin = (M, p) => G.apply(M, p);
-  const linDir = (M, d) => [M[0][0] * d[0] + M[0][1] * d[1] + M[0][2] * d[2], M[1][0] * d[0] + M[1][1] * d[1] + M[1][2] * d[2], M[2][0] * d[0] + M[2][1] * d[1] + M[2][2] * d[2]];
-  const t0 = lin(A, o), tu = linDir(A, U), tv = linDir(A, V);
-  const ov = state.ovOn && state.ov ? state.ov : null;
-  let q0, qu, qv;
-  if (ov) { const W = ov.world_to_voxel; q0 = lin(W, o); qu = linDir(W, U); qv = linDir(W, V); }
-  const d = img.data, thr = state.thr;
-  for (let py = 0; py < RES; py++) {
-    for (let px = 0; px < RES; px++) {
-      const i = t0[0] + px * tu[0] + py * tv[0], j = t0[1] + px * tu[1] + py * tv[1], k = t0[2] + px * tu[2] + py * tv[2];
-      let g = G.trilinear(t1.data, t1.shape, i, j, k);
-      if (Number.isNaN(g)) g = 0;
-      let r = g, gg = g, b = g;
-      if (ov) {
-        const t = G.trilinear(ov.data, ov.shape, q0[0] + px * qu[0] + py * qv[0], q0[1] + px * qu[1] + py * qv[1], q0[2] + px * qu[2] + py * qv[2]);
-        if (t > thr) {
-          const f = Math.min(1, (t - thr) / 5);
-          const a = 0.75;
-          r = (1 - a) * g + a * 255; gg = (1 - a) * g + a * (60 + 195 * f); b = (1 - a) * g + a * 20 * f;
-        }
-      }
-      const p = 4 * (py * RES + px);
-      d[p] = r; d[p + 1] = gg; d[p + 2] = b; d[p + 3] = 255;
-    }
-  }
+  G.renderPlane(img.data, RES, pl, state.t1, state.ovOn && state.ov ? state.ov : null, state.thr);
   ctx.putImageData(img, 0, 0);
   drawAnnotations(v, pl);
-}
-
-const LETTERS = [["R", "L"], ["A", "P"], ["S", "I"]];
-function letter(vec) {
-  let ax = 0;
-  for (let a = 1; a < 3; a++) if (Math.abs(vec[a]) > Math.abs(vec[ax])) ax = a;
-  const oblique = Math.abs(vec[ax]) < 0.95 ? "~" : "";
-  return oblique + LETTERS[ax][vec[ax] >= 0 ? 0 : 1];
 }
 
 function drawAnnotations(v, pl) {
@@ -159,10 +123,11 @@ function drawAnnotations(v, pl) {
   }
   // orientation letters
   ctx.fillStyle = "#ffb547"; ctx.font = "12px sans-serif"; ctx.textAlign = "center";
-  ctx.fillText(letter(basis.v), RES / 2, 14);
-  ctx.fillText(letter(G.scale(basis.v, -1)), RES / 2, RES - 6);
-  ctx.textAlign = "left"; ctx.fillText(letter(G.scale(basis.u, -1)), 4, RES / 2);
-  ctx.textAlign = "right"; ctx.fillText(letter(basis.u), RES - 4, RES / 2);
+  const [top, bottom, left, right] = G.edgeLetters(basis);
+  ctx.fillText(top, RES / 2, 14);
+  ctx.fillText(bottom, RES / 2, RES - 6);
+  ctx.textAlign = "left"; ctx.fillText(left, 4, RES / 2);
+  ctx.textAlign = "right"; ctx.fillText(right, RES - 4, RES / 2);
   // 10 mm scale bar
   const L = 10 / mmPerPx;
   ctx.strokeStyle = "#d9dee5"; ctx.beginPath(); ctx.moveTo(RES - 10 - L, RES - 10); ctx.lineTo(RES - 10, RES - 10); ctx.stroke();
@@ -216,7 +181,7 @@ function updateReadouts() {
   $("rRas").textContent = fmt(p);
   $("rLps").textContent = fmt(G.rasToLps(p));
   const ijk = G.apply(state.t1.inv, p);
-  $("rVox").textContent = ijk.map((x) => Math.round(x)).join(", ");
+  $("rVox").textContent = G.apply(G.inv4(state.scene.t1.affine_original), p).map((x) => Math.round(x)).join(", ");
   const g = G.trilinear(state.t1.data, state.t1.shape, ijk[0], ijk[1], ijk[2]);
   $("rT1").textContent = Number.isNaN(g) ? "outside" : g.toFixed(0) + " (display units)";
   const t = sampleOverlay(p);
@@ -314,8 +279,10 @@ function wireControls() {
 
 function buildPlan() {
   const s = state.scene;
+  // voxel index in the ORIGINAL T1 NIfTI (the one whose sha256 is in inputs), not the cropped display volume
+  const invOrig = G.inv4(s.t1.affine_original);
   const P = (p) => p && { ras_mm: p.map((x) => +x.toFixed(3)), lps_mm: G.rasToLps(p).map((x) => +x.toFixed(3)),
-    t1_voxel: G.apply(state.t1.inv, p).map((x) => +x.toFixed(3)) };
+    t1_voxel: G.apply(invOrig, p).map((x) => +x.toFixed(3)) };
   const plan = {
     schema: "scan-to-target/plan/1",
     created: new Date().toISOString(),
@@ -324,6 +291,7 @@ function buildPlan() {
     target: P(state.target),
     entry: P(state.entry),
     trajectory: null,
+    map_label: s.overlay ? s.overlay.label : null,
     map_t_at_target: state.target ? +sampleOverlay(state.target).toFixed(3) : null,
     target_mni_approx_mm: state.target && toMni(state.target) ? toMni(state.target).map((x) => +x.toFixed(1)) : null,
     warnings: planWarnings(),
@@ -345,7 +313,7 @@ async function exportPlan() {
     const r = await fetch("api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(plan) });
     if (!r.ok) throw new Error(await r.text());
     const res = await r.json();
-    msg.textContent = `Saved ${res.saved_as}. Checked by the server: target re-read at ${res.check.target_voxel_error.toExponential(1)} voxel.`;
+    msg.textContent = `Saved ${res.saved_as}. Server: target at T1 file voxel ${res.check.t1_file_voxel.map((x) => x.toFixed(1)).join(", ")}${res.check.lps_consistent ? "" : "; LPS does not match RAS!"}.`;
     if (res.robot) showRobot(res.robot);
   } catch (err) {
     const blob = new Blob([JSON.stringify(plan, null, 2)], { type: "application/json" });

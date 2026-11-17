@@ -56,6 +56,11 @@ def run(bold_path, events_path, out_dir, tr: float | None = None, smooth_fwhm_mm
         log(f"dropped {drop} non-steady-state volume(s)")
 
     mats_file = out / "motion_matrices.npy"
+    key_file = out / "motion_key.json"
+    key = {"bold_sha256": bold_full.meta["sha256"], "dropped_volumes": drop, "n_scans": n}
+    if mats_file.exists() and (not key_file.exists() or json.loads(key_file.read_text()) != key):
+        log("motion: cached matrices are for different input, recomputing")
+        mats_file.unlink()
     if mats_file.exists():
         mats = list(np.load(mats_file))
         ref = bold.frame(0)
@@ -66,6 +71,7 @@ def run(bold_path, events_path, out_dir, tr: float | None = None, smooth_fwhm_mm
         log(f"motion: realigning {n} volumes")
         realigned, mats, _ = realign(bold, progress=lambda i, k: log(f"  {i}/{k}") if i % 46 == 0 else None)
         np.save(mats_file, np.array(mats))
+        key_file.write_text(json.dumps(key))
     params = np.array([matrix_to_params(M) for M in mats])
     fd = framewise_displacement(mats)
 
@@ -90,10 +96,11 @@ def run(bold_path, events_path, out_dir, tr: float | None = None, smooth_fwhm_mm
     np.save(out / "design.npy", design.X)
     peak = np.unravel_index(int(np.argmax(tmap.data)), tmap.shape3)
     summary = {
-        "bold": str(bold_path), "bold_sha256": bold.meta["sha256"], "tr": tr, "n_scans": n,
+        "bold": Path(bold_path).name, "bold_sha256": bold.meta["sha256"], "tr": tr, "n_scans": n,
         "dropped_volumes": drop, "n_vox_t_gt_3_1": int((tmap.data[mask] > 3.1).sum()),
         "n_vox_t_gt_3_1_finger_vs_rest": int((t_rest.data[mask] > 3.1).sum()),
         "smooth_fwhm_mm": smooth_fwhm_mm, "contrast": FINGER_CONTRAST, "dof": stats["dof"],
+        "noise_model": stats["noise_model"], "ar1_median": stats.get("ar1_median"),
         "max_abs_translation_mm": float(np.abs(params[:, 3:]).max()),
         "max_abs_rotation_deg": float(np.abs(params[:, :3]).max()),
         "mean_fd_mm": float(fd.mean()), "max_fd_mm": float(fd.max()),

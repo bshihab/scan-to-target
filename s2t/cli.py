@@ -16,7 +16,9 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+# Data and outputs are found relative to the working directory, so an installed
+# copy (for example in the Docker image) works from any checkout or mount.
+ROOT = Path.cwd()
 
 
 def cmd_ingest(a):
@@ -77,6 +79,7 @@ def run_subject(sub: str, ses: str, data: Path = ROOT / "data/ds000114", out_roo
     sdir = out_root / "scenes" / f"{sub}_ses-{ses}"
     scene.build(t1_path, fdir / "mean_epi.nii.gz", fdir / "tmap_finger.nii.gz", M, sdir, t1_to_mni=t1_to_mni,
                 title=f"ds000114 {sub} ses-{ses} · finger tapping",
+                overlay_label="finger > mean(foot, lips), t (AR(1) model, uncorrected)",
                 extra_inputs={"bold_sha256": summ["bold_sha256"], "contrast": summ["contrast"],
                               "smooth_fwhm_mm": summ["smooth_fwhm_mm"], "dropped_volumes": summ.get("dropped_volumes")})
     log(f"scene written to {sdir}")

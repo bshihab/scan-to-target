@@ -27,14 +27,15 @@
     <table class="readout">
       <tr><th>RAS mm</th><td id="rRas">–</td></tr>
       <tr><th>LPS mm</th><td id="rLps">–</td></tr>
-      <tr><th>T1 voxel</th><td id="rVox">–</td></tr>
+      <tr><th title="index in the original T1 NIfTI file">T1 voxel</th><td id="rVox">–</td></tr>
       <tr><th>T1 value</th><td id="rT1">–</td></tr>
       <tr><th id="rOvLabel">t</th><td id="rOv">–</td></tr>
       <tr><th title="12-parameter affine to the MNI152 template: good to several mm, a sanity check only">MNI ≈</th><td id="rMni">–</td></tr>
     </table>
 
     <h2>Overlay</h2>
-    <label class="row">threshold t &gt; <output id="thrOut">3.1</output>
+    <p class="hint" id="ovLabel"></p>
+    <label class="row">threshold t &gt; <output id="thrOut">3.1</output> <span class="muted">(uncorrected)</span>
       <input type="range" id="thr" min="1" max="10" step="0.1" value="3.1"></label>
     <label class="row"><input type="checkbox" id="ovOn" checked> show fMRI map</label>
     <label class="row"><input type="checkbox" id="radio" checked> radiological (patient right on screen left)</label>
