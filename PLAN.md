@@ -64,3 +64,4 @@ Dockerfile; `docker run` reproduces B1 and serves the viewer.
 
 ## Change log
 - 2026-11-17: plan written.
+- 2026-11-17, B2: run 1 (trilinear sampling, zero-filled simulation) failed: median 0.41 mm, max 1.82 mm. Started at the true answer the fit still drifted 0.2-0.5 mm, so the cost was biased, not the optimizer. Cause 1: trilinear interpolation pulls a least-squares fit towards whole-voxel offsets (0.1 voxel is 0.4 mm at 4 mm voxels); the final motion level now samples with cubic B-splines. Run 2 (cubic, same simulation) passed the median (0.15 mm) and failed the max (1.02 mm). Cause 2 is in the simulation: resampling one volume on its own grid fills tissue that moved out of the 30-slice slab with zeros, which a real scan never contains. The simulation now crops 12 mm off the top and bottom and resamples the moved image from the full volume (`--zero-fill` reproduces the old one). The bar itself is unchanged.
