@@ -29,6 +29,19 @@ B1c, real oblique MRI and a tilted CT (`python validation/b1c_oblique_and_ct.py`
 
 30 known motions up to 3 degrees and 3 mm, noise at the run's measured temporal SD (about 75 on a signal near 2,000), errors measured at 64 points on a 60 mm sphere. What changed between runs and why is in PLAN.md's change log. About 1.5 s per volume on the mini.
 
+## B3 GLM vs nilearn (pass)
+
+`python validation/b3_glm_vs_nilearn.py`
+
+Same realigned data, mask, events, SPM HRF, 128 s cosine drift, six motion regressors, OLS, no smoothing; nilearn builds its own design matrix from the events.
+
+| Session | Pearson r (t-maps in mask) | Max abs t difference | Peak voxel | Peak t ours / nilearn |
+|---|---|---|---|---|
+| test | 0.99997 | under 0.06 | identical | 7.89 / 7.84 |
+| retest | 0.99997 | under 0.06 | identical | 4.79 / 4.75 |
+
+Before this run, the pipeline was changed twice (see PLAN.md change log): leading non-steady-state volumes are dropped (volume 0 was 26-27% brighter than the rest of each run), and the contrast was briefly switched to finger vs rest on a diagnosis that turned out to be wrong, then restored to the pre-registered finger > mean(foot, lips). B3 passed both before and after these changes.
+
 ## B4a registration, known truth (pass)
 
 `python validation/b4_registration.py a`
@@ -39,7 +52,29 @@ B1c, real oblique MRI and a tilted CT (`python validation/b1c_oblique_and_ct.py`
 |---|---|---|---|---|
 | 0.48 mm | 0.56 mm | 0.89 mm | 0 | pass (1.0 / 2.0 / 5.0 mm) |
 
-About 5 s per registration. The error does not grow with the size of the motion, which points to a fixed floor (interpolation or the pseudo-EPI construction) rather than capture range.
+Run 1 used mutual information alone; about 5 s per registration. Started at the true answer, the fit still drifts about 0.48 mm, so the floor is a small bias in the cost rather than capture range. Run 2 (the run-3 method from B4b below: template brain mask, mutual information, then boundary-based refinement) is listed when it finishes.
+
+## B4b registration on real data (run 1 fail, run 2 fail, run 3 partly pass)
+
+`python validation/b4_registration.py b`
+
+There is no ground truth for registering a real EPI to a real T1. Run 1's bar was agreement with SimpleITK; after it failed, bars that need no second tool were added before each later run (PLAN.md change log).
+
+| Run | Method | Start spread (bar 1 mm) | Loop closure (bar 2 mm) | vs SimpleITK, max (bar 2 mm) |
+|---|---|---|---|---|
+| 1 | mutual information, whole head | not measured | not measured | 20.4 / 21.4 mm: fail |
+| 2 | mutual information, scalp stripped by erosion | 3.60 / 0.65 mm: fail | not measured | 13.7 / 3.3 mm: fail |
+| 3 | template brain mask, mutual information, then boundary-based | 0.001 / 0.001 mm: pass | 0.91 mm max, 0.68 mean: pass | 9.2 / 10.6 mm: fail |
+
+(test / retest session.) Start spread: refinements from the scanner alignment, the run-1 answer and the run-2 answer. Loop closure: EPI_retest to T1_retest to T1_test against EPI_retest to EPI_test to T1_test, where the T1-T1 and EPI-EPI steps are within one contrast; the head moved 6.8 and 8.9 degrees between sessions, so the loop is not trivially short.
+
+What this shows and what it doesn't. Run 3 converges to one answer from very different starts, and the two sessions' answers are consistent with each other through independent within-contrast registrations to under a millimetre. It moved the EPI 5.6 mm (test) and 1.2 mm (retest) from the scanner's own alignment, and 5-7 mm from the run-1 and run-2 mutual-information answers. SimpleITK's mutual-information registration, configured as in PLAN.md, disagrees by about 10 mm; overlays from run 1 (`out/figs/b4b_test_overlays.png`) show its answer pulled onto the scalp, and boundary-based refinement started from its answer stops at a much worse cost (0.96 against 0.70). That is evidence about SimpleITK's setup here, not proof that ours is right; the B4b SimpleITK bar is reported as failed.
+
+## B5 viewer geometry (pass)
+
+`python validation/b5_geometry_crosscheck.py`, plus a manual run in Chrome.
+
+The viewer's JS (`viewer/geometry.js`) and the Python code agree on 1,000 random points to 6e-14 mm (voxel to world, world to voxel, RAS to LPS, and the chain T1 world to EPI voxel through the real registration) and on trilinear sampling to 6e-8. In Chrome: target placed at the map peak, entry on the scalp, plan exported; the server re-read the target at 6.9e-4 voxel (bar 0.5 voxel) and converted it to the simulated robot frame (6 fiducials, FRE 0.32 mm, predicted TRE 0.20 mm, simulated error in that draw 0.13 mm). The browser test found that an entry could be placed in the air; the viewer now warns when the entry is off the scalp and can slide it onto the scalp along the planned line.
 
 ## B6 fiducial registration error (pass)
 
@@ -55,3 +90,13 @@ Robot-space fiducial noise sigma 0.25 mm per axis, 20,000 trials per layout, tar
 | Nearly in a line | 4 | 4.429 mm | 4.457 mm | +0.6% | 8.78 mm |
 
 The ranking matches. With the same tracker noise, four fiducials bunched on the forehead put the hand-area target about 11 times further off than six spread around the skull.
+
+## M7 test-retest of the target
+
+`python validation/m7_test_retest.py sub-01 ...`
+
+| Subject | Distance between sessions (T1 frame) | Test peak MNI (approx.) | Retest peak MNI (approx.) |
+|---|---|---|---|
+| sub-01 | 3.2 mm | 45, -12, 55 (t 8.7) | 48, -10, 57 (t 5.0) |
+
+Other subjects are added as they finish. The dataset paper does not say which hand was used; sub-01's map peaks on the right precentral gyrus and the finger-vs-rest map also lights the left cerebellum, which together point to left-hand tapping. MNI coordinates come from a 12-parameter affine alignment and are good to several millimetres.
