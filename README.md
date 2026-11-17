@@ -68,7 +68,7 @@ Each bar was written in PLAN.md before the run it judges. When a run failed and 
 | B1, B1c | Does the DICOM reader match dcm2niix on real series, and refuse a tilted CT? | 29/29 voxel-identical, corners within 7e-5 mm; CT refused for its 18.5 degree tilt |
 | B2 | Does motion correction recover known head motion? | median 0.075 mm, max 0.23 mm (third run; two failed runs logged) |
 | B3 | Does the GLM match nilearn with the same model? | r = 0.99997, same peak voxel (AR(1) and OLS) |
-| B4a | Is a known fMRI-to-T1 transform recovered? | median 0.23 mm on a pseudo-fMRI made from the T1; a harder version with simulated EPI distortion is in RESULTS.md |
+| B4a | Is a known fMRI-to-T1 transform recovered? | median 0.33 mm, worst point 1.1 mm, with simulated EPI distortion and dropout (0.23 mm without) |
 | B4b | On real data, is the registration stable and self-consistent? | same answer from three starts; cross-session loop closes to 0.91 mm; SimpleITK disagrees by about 10 mm (bar failed, see RESULTS.md) |
 | B5 | Does the viewer draw and export the right coordinates? | matches values recomputed from the source files to 1e-13; left-right phantom passes in both display conventions |
 | B6 | Does the predicted target error match simulation? | within 0.6% for four fiducial layouts |

@@ -60,7 +60,7 @@ Run 1 (commit 272978d) used mutual information alone; about 5 s per registration
 |---|---|---|---|---|---|---|
 | 1 | mutual information | inverted T1 | 0.48 mm | 0.56 mm | 0.89 mm | pass |
 | 2 | template mask, MI, then boundary-based (the pipeline) | inverted T1 | 0.23 mm | 0.36 mm | 0.60 mm | pass |
-| d | the pipeline | inverted T1 with simulated EPI distortion and dropout | B4AD_MEDIAN | B4AD_P95 | B4AD_WORST | B4AD_PASS |
+| d | the pipeline | inverted T1 with simulated EPI distortion and dropout | 0.33 mm | 0.64 mm | 1.10 mm | pass |
 
 Run 2 is partly circular, as the review pointed out: the pseudo-fMRI is an inverted copy of the same T1 whose white-matter surface drives the boundary cost, with no EPI distortion, so its 0.23 mm is optimistic. Bar B4a-d (written before it ran) adds a 4 mm displacement along the phase-encode axis over orbitofrontal cortex and 2.5 mm over each temporal pole, 70% signal dropout there, and a non-linear contrast; the error is still measured against the known rigid transform. It is still easier than real data (the real fMRI has a dark scalp and heavier inferior signal loss; `out/figs/pseudo_epi_distortion.png`).
 
