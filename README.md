@@ -14,7 +14,7 @@ Measured results, including failed runs, are in [RESULTS.md](RESULTS.md). The pl
 | 4. Fusion | MNI152 template alignment for a brain mask, then fMRI to T1 by mutual information followed by boundary-based registration | done, with one failed bar (see below) |
 | 5. Planning GUI | Browser viewer: three orthogonal slices, the fMRI map, target and entry placement, a slice along the path and one across it at a chosen depth | done, tested in Chrome |
 | 6. Robot hand-off | Point-based registration from image to a simulated robot frame, with Fitzpatrick's predicted target error | done (simulated tracker) |
-| 7. Cloud storage | Upload, search and retrieve through DICOMweb (Google Cloud Healthcare or any DICOMweb server) | client tested against a local fake server; not yet run on Google Cloud |
+| 7. Cloud storage | Upload, search and retrieve through DICOMweb (Google Cloud Healthcare or any DICOMweb server) | done: 608 instances uploaded to a Google Cloud Healthcare DICOM store, found, retrieved byte-identical and reloaded to the same voxels |
 | 8. Container | Dockerfile for the pipeline and the server | written, not yet built |
 
 ## The pipeline
@@ -72,6 +72,7 @@ Each bar was written in PLAN.md before the run it judges. When a run failed and 
 | B4b | On real data, is the registration stable and self-consistent? | same answer from three starts; cross-session loop closes to 0.91 mm; SimpleITK disagrees by about 10 mm (bar failed, see RESULTS.md) |
 | B5 | Does the viewer draw and export the right coordinates? | matches values recomputed from the source files to 1e-13; left-right phantom passes in both display conventions |
 | B6 | Does the predicted target error match simulation? | within 0.6% for four fiducial layouts |
+| M8 | Does a Google Cloud DICOMweb round trip preserve the files? | 608/608 instances byte-identical, same voxels and matrix after retrieval |
 | M7 | Does the planned target land in the same place on two days? | see RESULTS.md (10 subjects) |
 
 ## Limits

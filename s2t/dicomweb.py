@@ -16,8 +16,13 @@ import uuid
 from pathlib import Path
 
 
-def gcloud_token() -> str:
-    return subprocess.run(["gcloud", "auth", "print-access-token"], capture_output=True, text=True, check=True).stdout.strip()
+def gcloud_token(configuration: str) -> str:
+    """Access token from a named gcloud configuration. The name is required so
+    a token never comes silently from whatever configuration is active."""
+    if not configuration:
+        raise ValueError("name the gcloud configuration to use")
+    return subprocess.run(["gcloud", f"--configuration={configuration}", "auth", "print-access-token"],
+                          capture_output=True, text=True, check=True).stdout.strip()
 
 
 def gcp_base(project: str, location: str, dataset: str, store: str) -> str:

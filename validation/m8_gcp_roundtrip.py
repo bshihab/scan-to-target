@@ -6,8 +6,10 @@ retrieves every instance in its original transfer syntax, and checks:
   - the retrieved series loads to the same voxels and matrix (B1 still holds).
 Then deletes the studies it created.
 
-Usage (after `gcloud auth login` and creating the dataset and store):
-  python validation/m8_gcp_roundtrip.py PROJECT LOCATION DATASET STORE
+Usage (after creating the dataset and store):
+  python validation/m8_gcp_roundtrip.py GCLOUD_CONFIG PROJECT LOCATION DATASET STORE
+GCLOUD_CONFIG is the name of the gcloud configuration whose account is used;
+there is no default, so the active configuration is never picked up by accident.
 """
 import json
 import sys
@@ -25,8 +27,8 @@ from s2t.dicomweb import DicomWeb, gcloud_token, gcp_base, tag  # noqa: E402
 
 
 def main():
-    project, location, dataset, store = sys.argv[1:5]
-    client = DicomWeb(gcp_base(project, location, dataset, store), token=gcloud_token())
+    config, project, location, dataset, store = sys.argv[1:6]
+    client = DicomWeb(gcp_base(project, location, dataset, store), token=gcloud_token(config))
     rows, studies = [], set()
     for sdir in sorted((ROOT / "data/dicom/dcm_qa_nih/In").glob("*/mr_*")):
         files = sorted(p for p in sdir.iterdir() if dicom.is_dicom_file(p))

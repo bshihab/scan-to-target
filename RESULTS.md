@@ -102,6 +102,25 @@ MNI coordinates come from a 12-parameter affine and are good to several millimet
 
 An earlier draft of this file argued from sub-01's right-hemisphere motor peak and left-cerebellum response that the subject tapped with the left hand. The review pointed out that a left-right flipped image would look exactly the same, so that inference is withdrawn. The dataset paper does not say which hand was used.
 
+## M8 Google Cloud DICOMweb round trip (pass)
+
+`python validation/m8_gcp_roundtrip.py bilal testdicom-445700 us-central1 scan-to-target m8-roundtrip`, run 2026-11-17 against a Cloud Healthcare API DICOM store created for the test and deleted afterwards (with its dataset). The first argument names the gcloud configuration whose account signs the requests; there is no default.
+
+Pass condition (PLAN.md M8): every uploaded instance is found by search, comes back byte-identical, and the retrieved series loads to the same voxels and matrix.
+
+| Series | Files | Found by search | Byte-identical | Same voxels and matrix |
+|---|---|---|---|---|
+| 20180918GE/mr_0004 | 150 | 150 | 150 | yes |
+| 20180918GE/mr_0005 | 150 | 150 | 150 | yes |
+| 20180918GE/mr_0006 | 150 | 150 | 150 | yes |
+| 20180918GE/mr_0007 | 150 | 150 | 150 | yes |
+| 20180918Si/mr_0003 | 2 | 2 | 2 | yes |
+| 20180918Si/mr_0004 | 2 | 2 | 2 | yes |
+| 20180918Si/mr_0005 | 2 | 2 | 2 | yes |
+| 20180918Si/mr_0006 | 2 | 2 | 2 | yes |
+
+All 608 instances in 8 series passed. Upload (STOW-RS, 50 files per request) took 116 s in total and retrieval (WADO-RS, one request per instance, sequential) 247 s from the Mac mini; retrieval was not parallelised. The 2 studies were deleted through DICOMweb (HTTP 200 each) before the store itself was deleted.
+
 ## Review
 
 After the first full pass, an independent agent with no access to this conversation reviewed the code and docs and reported 11 findings. All are fixed or disclosed:
