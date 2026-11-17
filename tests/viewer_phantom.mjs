@@ -50,6 +50,25 @@ let b = brightest("sagittal", true, [0, 0, 0], 150);
 check(b.x < C - 30, `sagittal: anterior marker on screen left (x=${b.x.toFixed(1)})`);
 check(G.edgeLetters(b.pl.basis).join("") === "SIAP", `sagittal letters ${G.edgeLetters(b.pl.basis)}`);
 
+// Probe view (perpendicular to a mostly vertical path) follows the same convention.
+for (const radio of [true, false]) {
+  const tb = G.trajectoryBasis([5, 3, 60], [0, 0, 0], radio);
+  const pl = { basis: tb.probe, center: [0, 0, 0], mmPerPx: mm };
+  const img = G.renderPlane(new Uint8ClampedArray(RES * RES * 4), RES, pl, t1, null, 0);
+  let sx = 0, n = 0;
+  for (let y = 0; y < RES; y++) for (let x = 0; x < RES; x++) if (Math.abs(img[4 * (y * RES + x)] - 250) < 1) { sx += x + 0.5; n++; }
+  const x = sx / n;
+  check(n > 0 && (radio ? x > C + 30 : x < C - 30), `${radio ? "radiological" : "neurological"} probe view: patient-left marker on screen ${radio ? "right" : "left"} (x=${x.toFixed(1)})`);
+}
+
+// The along view's vertical axis must not change with the display convention.
+{
+  const a = G.trajectoryBasis([5, 3, 60], [0, 0, 0], true).along.v, b = G.trajectoryBasis([5, 3, 60], [0, 0, 0], false).along.v;
+  check(G.norm(G.sub(a, b)) < 1e-12, "along view's up axis is the same in both conventions");
+  const p = G.trajectoryBasis([60, 0, 5], [0, 0, 0], true);
+  check(p.along.v[2] > 0.9, "along view of a lateral path keeps superior at the top");
+}
+
 // Click consistency: a dot's drawn centre is where worldToPixel puts it, and clicking
 // that pixel position returns the dot's world point (sub-pixel, no half-pixel bias).
 data.fill(0);

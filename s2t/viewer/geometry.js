@@ -89,12 +89,16 @@ export function planeBasis(view, radiological = true) {
 // "along": contains the trajectory; its in-plane perpendicular is chosen as
 // close to superior (or anterior if the path is vertical) as possible.
 // "probe": perpendicular to the trajectory, what the tip would see.
-export function trajectoryBasis(entry, target) {
+// The probe view follows the same left-right convention as the main views:
+// in radiological mode its screen-right axis points to the patient's left.
+export function trajectoryBasis(entry, target, radiological = true) {
   const d = unit(sub(target, entry));
-  let ref = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0];
-  const side = unit(cross(d, ref));
-  const up = cross(side, d);
-  return { along: { u: d, v: up, n: side }, probe: { u: side, v: up, n: d }, dir: d };
+  const ref = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0];
+  const side0 = unit(cross(d, ref));
+  const up = cross(side0, d); // chosen before any flip, so "up" never depends on the display convention
+  const flip = (radiological && side0[0] > 0) || (!radiological && side0[0] < 0);
+  const side = flip ? scale(side0, -1) : side0;
+  return { along: { u: d, v: up, n: side0 }, probe: { u: side, v: up, n: d }, dir: d };
 }
 
 // World point for display pixel (px, py) of a W x H canvas whose centre maps

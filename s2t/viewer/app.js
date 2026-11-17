@@ -61,7 +61,7 @@ function plane(v) {
     return { basis: b, center: G.add(state.center, G.scale(b.n, off)), mmPerPx: state.mmPerPx };
   }
   if (!state.target || !state.entry || G.norm(G.sub(state.target, state.entry)) < 1) return null;
-  const tb = G.trajectoryBasis(state.entry, state.target);
+  const tb = G.trajectoryBasis(state.entry, state.target, state.radiological);
   const len = G.norm(G.sub(state.target, state.entry));
   if (v.name === "along") {
     const mid = G.scale(G.add(state.entry, state.target), 0.5);
