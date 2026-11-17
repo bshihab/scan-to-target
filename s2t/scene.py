@@ -54,7 +54,7 @@ def scalp_points(t1: Volume, mask: np.ndarray, directions) -> np.ndarray:
 FIDUCIAL_DIRECTIONS = [(0, 1, 0.35), (1, 0.2, 0.45), (-1, 0.2, 0.45), (0, -1, 0.45), (0.25, -0.1, 1), (-0.6, 0.6, 0.6)]
 
 
-def build(t1_path, mean_epi_path, tmap_path, epi_to_t1: np.ndarray, out_dir, title: str,
+def build(t1_path, mean_epi_path, tmap_path, epi_to_t1: np.ndarray, out_dir, title: str, t1_to_mni=None,
           extra_inputs: dict | None = None, fiducial_sigma_mm: float = 0.25, seed: int = 0) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -92,6 +92,7 @@ def build(t1_path, mean_epi_path, tmap_path, epi_to_t1: np.ndarray, out_dir, tit
                     "world_to_voxel": (np.linalg.inv(tmap.affine) @ np.linalg.inv(epi_to_t1)).tolist()},
         "peak_ras": [float(x) for x in peak_ras],
         "peak_t": float(tmap.data.max()),
+        "t1_to_mni": None if t1_to_mni is None else np.asarray(t1_to_mni).tolist(),
         "head_center_ras": [float(x) for x in head_c],
         "inputs": {"t1_sha256": sha256(t1_path), "tmap_sha256": sha256(tmap_path),
                    "mean_epi_sha256": sha256(mean_epi_path), "epi_to_t1": epi_to_t1.tolist(), **(extra_inputs or {})},

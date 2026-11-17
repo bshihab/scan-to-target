@@ -11,14 +11,10 @@ from .motion import framewise_displacement, matrix_to_params, realign
 from .register import foreground_threshold
 from .volume import Volume, resample_to
 
-# Finger movement against rest. Foot and Lips are in the model as their own
-# regressors, so they don't leak into the baseline. The planned contrast
-# (Finger minus the mean of Foot and Lips) is kept as a second output: on
-# ds000114 sub-01 one of those conditions comes with a whole-brain signal drop
-# (Lips in ses-test, Foot in ses-retest), which turns that contrast positive
-# almost everywhere. See PLAN.md change log.
-FINGER_CONTRAST = {"Finger": 1.0}
-FINGER_VS_OTHERS = {"Finger": 1.0, "Foot": -0.5, "Lips": -0.5}
+# Pre-registered contrast: finger movement against the mean of the other two
+# movements. Finger against rest is written as a second map.
+FINGER_CONTRAST = {"Finger": 1.0, "Foot": -0.5, "Lips": -0.5}
+FINGER_VS_REST = {"Finger": 1.0}
 
 NONSTEADY_THRESHOLD = 1.05  # leading volumes brighter than 105% of the run median are dropped
 
@@ -82,9 +78,9 @@ def run(bold_path, events_path, out_dir, tr: float | None = None, smooth_fwhm_mm
                                confound_names=["rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z"])
     c = glm.contrast_vector(design, FINGER_CONTRAST)
     tmap, stats = glm.fit_t(realigned, design, c, mask, smooth_fwhm_mm=smooth_fwhm_mm)
-    t_others, _ = glm.fit_t(realigned, design, glm.contrast_vector(design, FINGER_VS_OTHERS), mask,
-                            smooth_fwhm_mm=smooth_fwhm_mm)
-    t_others.to_nifti(out / "tmap_finger_vs_others.nii.gz")
+    t_rest, _ = glm.fit_t(realigned, design, glm.contrast_vector(design, FINGER_VS_REST), mask,
+                          smooth_fwhm_mm=smooth_fwhm_mm)
+    t_rest.to_nifti(out / "tmap_finger_vs_rest.nii.gz")
 
     mean_epi.to_nifti(out / "mean_epi.nii.gz")
     tmap.to_nifti(out / "tmap_finger.nii.gz")
@@ -96,7 +92,7 @@ def run(bold_path, events_path, out_dir, tr: float | None = None, smooth_fwhm_mm
     summary = {
         "bold": str(bold_path), "bold_sha256": bold.meta["sha256"], "tr": tr, "n_scans": n,
         "dropped_volumes": drop, "n_vox_t_gt_3_1": int((tmap.data[mask] > 3.1).sum()),
-        "n_vox_t_gt_3_1_finger_vs_others": int((t_others.data[mask] > 3.1).sum()),
+        "n_vox_t_gt_3_1_finger_vs_rest": int((t_rest.data[mask] > 3.1).sum()),
         "smooth_fwhm_mm": smooth_fwhm_mm, "contrast": FINGER_CONTRAST, "dof": stats["dof"],
         "max_abs_translation_mm": float(np.abs(params[:, 3:]).max()),
         "max_abs_rotation_deg": float(np.abs(params[:, :3]).max()),

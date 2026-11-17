@@ -30,6 +30,7 @@
       <tr><th>T1 voxel</th><td id="rVox">–</td></tr>
       <tr><th>T1 value</th><td id="rT1">–</td></tr>
       <tr><th id="rOvLabel">t</th><td id="rOv">–</td></tr>
+      <tr><th title="12-parameter affine to the MNI152 template: good to several mm, a sanity check only">MNI ≈</th><td id="rMni">–</td></tr>
     </table>
 
     <h2>Overlay</h2>
@@ -50,7 +51,10 @@
       <tr><th>Entry RAS</th><td id="pEntry">–</td></tr>
       <tr><th>Path length</th><td id="pLen">–</td></tr>
       <tr><th>t at target</th><td id="pT">–</td></tr>
+      <tr><th>Target MNI ≈</th><td id="pMni">–</td></tr>
     </table>
+    <p class="warn-msg" id="planWarn" hidden></p>
+    <button id="snapEntry" disabled title="Slide the entry along the planned line to where it leaves the head">Snap entry to scalp</button>
     <label class="row">probe depth <output id="depthOut">100%</output>
       <input type="range" id="depth" min="0" max="120" step="1" value="100"></label>
     <textarea id="notes" rows="2" placeholder="Notes saved with the plan"></textarea>

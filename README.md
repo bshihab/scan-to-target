@@ -68,7 +68,25 @@ Each step has a test whose pass bar was written down before the code that it mea
 
 ## Running it
 
-Coming with step 1.
+Python 3.11 or newer. About 200 MB of data and 600 MB of packages (half of that is the validation-only references).
+
+```
+python -m venv .venv && .venv/bin/pip install -e ".[validation]"
+scripts/fetch_data.sh                      # public data into data/ (sub-01 by default; pass more subjects as arguments)
+
+.venv/bin/s2t ingest data/dicom/dcm_qa_nih/In/20180918Si/mr_0003 -o epi.nii.gz   # any DICOM series folder
+.venv/bin/s2t subject sub-01 test          # realign, GLM, register to T1, build a viewer scene (about 5 min)
+.venv/bin/s2t serve out/scenes/sub-01_ses-test
+```
+
+Then open http://127.0.0.1:8770. The server listens on localhost only; from another machine use `ssh -L 8770:localhost:8770 <host>`. Click to move the cursor, press T at the target and E at the entry point, check the two trajectory views, and export. The server re-reads the plan, checks it against the scan it was made on, and writes the target in the simulated robot frame with its predicted error.
+
+Tests and validation:
+
+```
+.venv/bin/python -m pytest                                  # unit tests
+.venv/bin/python validation/b1_dicom_vs_dcm2niix.py          # each validation script prints its bar and writes out/<bar>.json
+```
 
 ## How this was made
 

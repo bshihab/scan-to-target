@@ -169,6 +169,41 @@ function drawAnnotations(v, pl) {
   ctx.font = "10px sans-serif"; ctx.textAlign = "right"; ctx.fillStyle = "#d9dee5"; ctx.fillText("10 mm", RES - 10, RES - 14);
 }
 
+// ---- head surface ------------------------------------------------------------
+// The T1 is windowed to 0-255 for display; scalp and skin sit well above this.
+const HEAD_LEVEL = 25;
+function t1At(p) {
+  const q = G.apply(state.t1.inv, p);
+  const v = G.trilinear(state.t1.data, state.t1.shape, q[0], q[1], q[2]);
+  return Number.isNaN(v) ? 0 : v;
+}
+// Walk from the target outward along the planned line; the scalp is the last
+// point before at least 5 mm of continuous air.
+function scalpAlong(target, dirOut) {
+  let last = null, air = 0;
+  for (let s = 0; s <= 200; s += 0.5) {
+    const p = G.add(target, G.scale(dirOut, s));
+    if (t1At(p) >= HEAD_LEVEL) { last = p; air = 0; } else if (last && (air += 0.5) >= 5) break;
+  }
+  return last;
+}
+function planWarnings() {
+  const w = [];
+  if (state.entry) {
+    if (t1At(state.entry) < HEAD_LEVEL) w.push("Entry is outside the head.");
+    if (state.target) {
+      const d = G.unit(G.sub(state.entry, state.target));
+      const sc = scalpAlong(state.target, d);
+      if (sc) {
+        const gap = G.dot(G.sub(state.entry, sc), d);
+        if (Math.abs(gap) > 3) w.push(`Entry is ${Math.abs(gap).toFixed(0)} mm ${gap > 0 ? "outside" : "inside"} the scalp along this line.`);
+      }
+    }
+  }
+  return w;
+}
+function toMni(p) { return state.scene.t1_to_mni ? G.apply(state.scene.t1_to_mni, p) : null; }
+
 // ---- readouts ----------------------------------------------------------------
 function sampleOverlay(p) {
   if (!state.ov) return NaN;
@@ -186,6 +221,12 @@ function updateReadouts() {
   $("rT1").textContent = Number.isNaN(g) ? "outside" : g.toFixed(0) + " (display units)";
   const t = sampleOverlay(p);
   $("rOv").textContent = Number.isNaN(t) ? "outside map" : t.toFixed(2);
+  $("rMni").textContent = fmt(toMni(p), 0);
+  $("pMni").textContent = state.target ? fmt(toMni(state.target), 0) : "–";
+  const warns = planWarnings();
+  $("planWarn").hidden = warns.length === 0;
+  $("planWarn").textContent = warns.join(" ");
+  $("snapEntry").disabled = !(state.target && state.entry);
   $("pTarget").textContent = fmt(state.target);
   $("pEntry").textContent = fmt(state.entry);
   const ok = state.target && state.entry && G.norm(G.sub(state.target, state.entry)) >= 1;
@@ -252,6 +293,10 @@ function wireControls() {
   $("setTarget").addEventListener("click", () => setPoint("target"));
   $("setEntry").addEventListener("click", () => setPoint("entry"));
   $("export").addEventListener("click", exportPlan);
+  $("snapEntry").addEventListener("click", () => {
+    const sc = scalpAlong(state.target, G.unit(G.sub(state.entry, state.target)));
+    if (sc) { state.entry = sc; state.cursor = sc.slice(); render(); }
+  });
   window.addEventListener("keydown", (e) => {
     if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
     const k = e.key.toLowerCase();
@@ -280,6 +325,8 @@ function buildPlan() {
     entry: P(state.entry),
     trajectory: null,
     map_t_at_target: state.target ? +sampleOverlay(state.target).toFixed(3) : null,
+    target_mni_approx_mm: state.target && toMni(state.target) ? toMni(state.target).map((x) => +x.toFixed(1)) : null,
+    warnings: planWarnings(),
     map_threshold_shown: state.thr,
     inputs: s.inputs,
     notes: $("notes").value,

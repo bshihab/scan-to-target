@@ -27,7 +27,10 @@ from scipy import ndimage
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from s2t import transforms as T  # noqa: E402
-from s2t.register import foreground_threshold, register_rigid  # noqa: E402
+from s2t import template  # noqa: E402
+from s2t.register import (foreground_threshold, register_bbr, register_epi_to_t1,  # noqa: E402
+                          register_epi_to_t1_bbr, register_rigid, t1_registration_mask)
+from s2t.register import Level  # noqa: E402
 from s2t.volume import Volume, resample_to  # noqa: E402
 
 D = ROOT / "data/ds000114/sub-01"
@@ -72,13 +75,14 @@ def part_a(n=30, seed=11):
     grid = Volume.from_nifti(bold_path("test")).frame(1)
     c = brain_center(t1)
     pts = T.sphere_points(c, 60.0, 64)
+    brain = template.brain_mask_in_t1(t1, t1_to_mni("test", t1))
     rng = np.random.default_rng(seed)
     rows = []
     t0 = time.time()
     for k in range(n):
         Tk = T.random_rigid(rng, 10.0, 15.0, c)
         pe = pseudo_epi(t1, grid, Tk, rng)
-        M = register_rigid(t1, pe, metric="mi").matrix
+        M = register_epi_to_t1_bbr(t1, pe, brain).matrix
         err = T.transform_error_mm(M, np.linalg.inv(Tk), pts)
         rows.append({"true_deg": T.rotation_angle_deg(Tk), "true_mm": float(np.linalg.norm(Tk[:3, 3])),
                      "err_mean_mm": float(err.mean()), "err_max_mm": float(err.max())})
@@ -93,11 +97,23 @@ def part_a(n=30, seed=11):
     return {"summary": s, "rows": rows}
 
 
-def sitk_register(fixed_path, moving_path):
+def t1_to_mni(ses, t1=None):
+    f = ROOT / f"out/sub-01/ses-{ses}/t1_to_mni.npy"
+    if not f.exists():
+        np.save(f, template.align_template(t1 if t1 is not None else Volume.from_nifti(t1_path(ses)))[0])
+    return np.load(f)
+
+
+def sitk_register(fixed_path, moving_path, mask=None):
+    """mask: boolean array on the fixed image's grid (numpy [i, j, k] order)."""
     import SimpleITK as sitk
     fixed = sitk.ReadImage(str(fixed_path), sitk.sitkFloat32)
     moving = sitk.ReadImage(str(moving_path), sitk.sitkFloat32)
     reg = sitk.ImageRegistrationMethod()
+    if mask is not None:
+        mimg = sitk.GetImageFromArray(np.transpose(mask.astype(np.uint8), (2, 1, 0)))  # SimpleITK arrays are [k, j, i]
+        mimg.CopyInformation(fixed)
+        reg.SetMetricFixedMask(mimg)
     reg.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
     reg.SetMetricSamplingStrategy(reg.RANDOM)
     reg.SetMetricSamplingPercentage(0.2, seed=1)
@@ -124,28 +140,58 @@ def sitk_register(fixed_path, moving_path):
 
 
 def part_b():
-    rows = []
+    """Run 3 (boundary-based registration; bars in PLAN.md written before it
+    ran). Run-1 and run-2 answers are read from out/b4b_run1.json and _run2."""
+    import nibabel as nib
+    prev = {k: {r["session"]: r for r in json.loads((ROOT / f"out/b4b_{k}.json").read_text())["rows"]}
+            for k in ("run1", "run2")}
+    rows, A, t1s, means = [], {}, {}, {}
     for ses in ("test", "retest"):
         t1 = Volume.from_nifti(t1_path(ses))
         mean_path = ROOT / f"out/sub-01/ses-{ses}/fmri/mean_epi.nii.gz"
         mean = Volume.from_nifti(mean_path)
-        t0 = time.time()
-        ours = register_rigid(t1, mean, metric="mi").matrix
-        t_ours = time.time() - t0
-        t0 = time.time()
-        theirs, metric = sitk_register(t1_path(ses), mean_path)
-        t_sitk = time.time() - t0
+        t1s[ses], means[ses] = t1, mean
+        brain = template.brain_mask_in_t1(t1, t1_to_mni(ses, t1))
         pts = T.sphere_points(brain_center(t1), 60.0, 64)
+        t0 = time.time()
+        ours = register_epi_to_t1_bbr(t1, mean, brain).matrix
+        t_ours = time.time() - t0
+        starts = {"scanner": np.eye(4), "run1": np.array(prev["run1"][ses]["ours_matrix"]),
+                  "run2": np.array(prev["run2"][ses]["ours_matrix"])}
+        refined = {k: register_bbr(t1, mean, v, brain).matrix for k, v in starts.items()}
+        allm = list(refined.values()) + [ours]
+        spread = max(T.transform_error_mm(a, b, pts).max() for a in allm for b in allm)
+        theirs, _ = sitk_register(t1_path(ses), mean_path, mask=t1_registration_mask(t1))
         d = T.transform_error_mm(ours, theirs, pts)
-        moved_by = T.transform_error_mm(ours, np.eye(4), pts)
-        rows.append({"session": ses, "agreement_max_mm": float(d.max()), "agreement_mean_mm": float(d.mean()),
-                     "ours_vs_scanner_alignment_mean_mm": float(moved_by.mean()),
-                     "ours_rotation_deg": T.rotation_angle_deg(ours), "seconds_ours": t_ours, "seconds_sitk": t_sitk,
-                     "ours_matrix": ours.tolist(), "sitk_matrix": theirs.tolist(), "passed": bool(d.max() <= 2.0)})
+        A[ses] = ours
+        rows.append({"session": ses, "start_spread_max_mm": float(spread), "sitk_agreement_max_mm": float(d.max()),
+                     "sitk_agreement_mean_mm": float(d.mean()),
+                     "ours_vs_scanner_alignment_mean_mm": float(T.transform_error_mm(ours, np.eye(4), pts).mean()),
+                     "ours_vs_run1_mean_mm": float(T.transform_error_mm(ours, starts["run1"], pts).mean()),
+                     "ours_vs_run2_mean_mm": float(T.transform_error_mm(ours, starts["run2"], pts).mean()),
+                     "seconds_ours": t_ours, "ours_matrix": ours.tolist(), "sitk_matrix": theirs.tolist(),
+                     "passed_b_spread": bool(spread <= 1.0), "passed_d_sitk": bool(d.max() <= 2.0)})
         np.save(ROOT / f"out/sub-01/ses-{ses}/fmri/epi_to_t1.npy", ours)
-        print(f"  b {ses}: agreement max {d.max():.2f} mm, mean {d.mean():.2f} mm; "
-              f"registration moved the EPI {moved_by.mean():.2f} mm from the scanner alignment", flush=True)
-    return {"rows": rows, "passed": all(r["passed"] for r in rows)}
+        print(f"  b {ses}: start spread {spread:.2f} mm; vs SimpleITK max {d.max():.2f} mm; EPI moved "
+              f"{rows[-1]['ours_vs_scanner_alignment_mean_mm']:.2f} mm from the scanner alignment", flush=True)
+
+    # (c) loop closure across sessions
+    brain_test = template.brain_mask_in_t1(t1s["test"], t1_to_mni("test"))
+    C = register_rigid(t1s["test"], t1s["retest"], metric="mi", fixed_mask=brain_test,
+                       levels=(Level(8, 8, max_points=100000), Level(4, 4, max_points=100000),
+                               Level(2, 2, max_points=100000, order=3))).matrix  # T1_retest -> T1_test
+    epi_mask = nib.load(str(ROOT / "out/sub-01/ses-test/fmri/brain_mask.nii.gz")).get_fdata() > 0.5
+    D = register_rigid(means["test"], means["retest"], metric="ssd", fixed_mask=epi_mask).matrix  # EPI_retest -> EPI_test
+    pts = T.sphere_points(brain_center(t1s["test"]), 60.0, 64)
+    loop = T.transform_error_mm(A["test"] @ D, C @ A["retest"], pts)
+    loop_info = {"max_mm": float(loop.max()), "mean_mm": float(loop.mean()), "passed_c_loop": bool(loop.max() <= 2.0),
+                 "t1_retest_to_test_rotation_deg": T.rotation_angle_deg(C),
+                 "epi_retest_to_test_rotation_deg": T.rotation_angle_deg(D)}
+    print(f"  b loop closure: max {loop.max():.2f} mm, mean {loop.mean():.2f} mm", flush=True)
+    passed = all(r["passed_b_spread"] for r in rows) and loop_info["passed_c_loop"]
+    return {"run": 3, "rows": rows, "loop_closure": loop_info,
+            "passed_b_and_c": bool(passed), "passed_d_sitk": all(r["passed_d_sitk"] for r in rows),
+            "passed": bool(passed and all(r["passed_d_sitk"] for r in rows))}
 
 
 def main():

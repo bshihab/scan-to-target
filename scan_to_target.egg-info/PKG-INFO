@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: scan-to-target
+Version: 0.1.0
+Summary: DICOM/NIfTI ingest, fMRI motor mapping, registration and target planning (research demo, not a medical device)
+Requires-Python: >=3.11
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: nibabel
+Requires-Dist: pydicom
+Requires-Dist: pylibjpeg
+Requires-Dist: pylibjpeg-libjpeg
+Requires-Dist: pylibjpeg-openjpeg
+Provides-Extra: validation
+Requires-Dist: nilearn; extra == "validation"
+Requires-Dist: SimpleITK; extra == "validation"
+Requires-Dist: pytest; extra == "validation"
+Requires-Dist: matplotlib; extra == "validation"

@@ -52,22 +52,30 @@ def subject_paths(data: Path, sub: str, ses: str):
 
 def run_subject(sub: str, ses: str, data: Path = ROOT / "data/ds000114", out_root: Path = ROOT / "out", log=print) -> Path:
     from . import fmri, scene
-    from .register import register_rigid
+    from . import template
+    from .register import register_epi_to_t1_bbr
     from .volume import Volume
     t1_path, bold_path, events = subject_paths(Path(data), sub, ses)
     fdir = out_root / sub / f"ses-{ses}" / "fmri"
     summary_file = fdir / "fmri_summary.json"
     if not summary_file.exists() or not (fdir / "motion_matrices.npy").exists():
         fmri.run(bold_path, events, fdir, log=log)
+    t1 = Volume.from_nifti(t1_path)
+    mni_file = fdir.parent / "t1_to_mni.npy"
+    if not mni_file.exists():
+        log("aligning the MNI152 template to the T1 (affine, for the brain mask and MNI coordinates)")
+        np.save(mni_file, template.align_template(t1)[0])
+    t1_to_mni = np.load(mni_file)
     reg_file = fdir / "epi_to_t1.npy"
     if not reg_file.exists():
-        log("registering mean EPI to T1 (mutual information)")
-        M = register_rigid(Volume.from_nifti(t1_path), Volume.from_nifti(fdir / "mean_epi.nii.gz"), metric="mi").matrix
+        log("registering mean EPI to T1 (mutual information, then boundary-based)")
+        brain = template.brain_mask_in_t1(t1, t1_to_mni)
+        M = register_epi_to_t1_bbr(t1, Volume.from_nifti(fdir / "mean_epi.nii.gz"), brain).matrix
         np.save(reg_file, M)
     M = np.load(reg_file)
     summ = json.loads(summary_file.read_text())
     sdir = out_root / "scenes" / f"{sub}_ses-{ses}"
-    scene.build(t1_path, fdir / "mean_epi.nii.gz", fdir / "tmap_finger.nii.gz", M, sdir,
+    scene.build(t1_path, fdir / "mean_epi.nii.gz", fdir / "tmap_finger.nii.gz", M, sdir, t1_to_mni=t1_to_mni,
                 title=f"ds000114 {sub} ses-{ses} · finger tapping",
                 extra_inputs={"bold_sha256": summ["bold_sha256"], "contrast": summ["contrast"],
                               "smooth_fwhm_mm": summ["smooth_fwhm_mm"], "dropped_volumes": summ.get("dropped_volumes")})
@@ -81,7 +89,7 @@ def cmd_subject(a):
 
 def cmd_serve(a):
     from .serve import serve
-    serve(a.scene_dir, port=a.port)
+    serve(a.scene_dir, host=a.host, port=a.port)
 
 
 def cmd_robot(a):
@@ -99,7 +107,7 @@ def main(argv=None):
     s = sp.add_parser("fmri"); s.add_argument("--bold", required=True); s.add_argument("--events", required=True); s.add_argument("--out", required=True); s.set_defaults(f=cmd_fmri)
     s = sp.add_parser("register"); s.add_argument("--fixed", required=True); s.add_argument("--moving", required=True); s.add_argument("-o", "--output", required=True); s.add_argument("--metric", default="mi", choices=["mi", "ssd"]); s.set_defaults(f=cmd_register)
     s = sp.add_parser("subject"); s.add_argument("sub"); s.add_argument("ses"); s.add_argument("--data", default=str(ROOT / "data/ds000114")); s.set_defaults(f=cmd_subject)
-    s = sp.add_parser("serve"); s.add_argument("scene_dir"); s.add_argument("--port", type=int, default=8770); s.set_defaults(f=cmd_serve)
+    s = sp.add_parser("serve"); s.add_argument("scene_dir"); s.add_argument("--port", type=int, default=8770); s.add_argument("--host", default="127.0.0.1", help="0.0.0.0 only inside a container whose port is published to 127.0.0.1"); s.set_defaults(f=cmd_serve)
     s = sp.add_parser("robot"); s.add_argument("plan"); s.add_argument("robot_demo"); s.set_defaults(f=cmd_robot)
     a = p.parse_args(argv)
     a.f(a)

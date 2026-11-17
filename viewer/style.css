@@ -47,3 +47,5 @@ textarea { width: 100%; margin-top: 8px; background: #0f1216; color: var(--text)
 @media (max-width: 560px) {
   .views { grid-template-columns: 1fr; }
 }
+.warn-msg { color: var(--warn); font-size: 12px; margin: 6px 0; }
+#snapEntry { width: 100%; margin-top: 4px; }
