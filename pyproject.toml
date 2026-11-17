@@ -3,10 +3,10 @@ name = "scan-to-target"
 version = "0.1.0"
 description = "DICOM/NIfTI ingest, fMRI motor mapping, registration and target planning (research demo, not a medical device)"
 requires-python = ">=3.11"
-dependencies = ["numpy", "scipy", "nibabel", "pydicom"]
+dependencies = ["numpy", "scipy", "nibabel", "pydicom", "pylibjpeg", "pylibjpeg-libjpeg", "pylibjpeg-openjpeg"]
 
 [project.optional-dependencies]
-validation = ["nilearn", "SimpleITK", "pytest"]
+validation = ["nilearn", "SimpleITK", "pytest", "matplotlib"]
 
 [project.scripts]
 s2t = "s2t.cli:main"

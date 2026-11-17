@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scan to Target planner</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="title">Scan to Target <span class="muted">planner</span></div>
+  <div class="scene-id" id="sceneId">loading…</div>
+  <div class="warn">Research demo on public data. Not for clinical use.</div>
+</header>
+
+<main>
+  <section class="views" id="views">
+    <figure class="view" data-view="axial"><canvas></canvas><figcaption>Axial</figcaption></figure>
+    <figure class="view" data-view="coronal"><canvas></canvas><figcaption>Coronal</figcaption></figure>
+    <figure class="view" data-view="sagittal"><canvas></canvas><figcaption>Sagittal</figcaption></figure>
+    <figure class="view" data-view="along"><canvas></canvas><figcaption>Along trajectory</figcaption></figure>
+    <figure class="view" data-view="probe"><canvas></canvas><figcaption>Probe's eye <span id="probeDepth"></span></figcaption></figure>
+  </section>
+
+  <aside class="panel">
+    <h2>Cursor</h2>
+    <table class="readout">
+      <tr><th>RAS mm</th><td id="rRas">–</td></tr>
+      <tr><th>LPS mm</th><td id="rLps">–</td></tr>
+      <tr><th>T1 voxel</th><td id="rVox">–</td></tr>
+      <tr><th>T1 value</th><td id="rT1">–</td></tr>
+      <tr><th id="rOvLabel">t</th><td id="rOv">–</td></tr>
+    </table>
+
+    <h2>Overlay</h2>
+    <label class="row">threshold t &gt; <output id="thrOut">3.1</output>
+      <input type="range" id="thr" min="1" max="10" step="0.1" value="3.1"></label>
+    <label class="row"><input type="checkbox" id="ovOn" checked> show fMRI map</label>
+    <label class="row"><input type="checkbox" id="radio" checked> radiological (patient right on screen left)</label>
+    <button id="toPeak" title="Move the cursor to the strongest finger-movement voxel">Go to map peak</button>
+
+    <h2>Plan</h2>
+    <div class="mode">
+      <button id="setTarget" class="mode-btn">Set target <kbd>T</kbd></button>
+      <button id="setEntry" class="mode-btn">Set entry <kbd>E</kbd></button>
+    </div>
+    <p class="hint" id="modeHint">Click a view to move the cursor. Press T or E (or a button) to drop the target or entry at the cursor.</p>
+    <table class="readout">
+      <tr><th>Target RAS</th><td id="pTarget">–</td></tr>
+      <tr><th>Entry RAS</th><td id="pEntry">–</td></tr>
+      <tr><th>Path length</th><td id="pLen">–</td></tr>
+      <tr><th>t at target</th><td id="pT">–</td></tr>
+    </table>
+    <label class="row">probe depth <output id="depthOut">100%</output>
+      <input type="range" id="depth" min="0" max="120" step="1" value="100"></label>
+    <textarea id="notes" rows="2" placeholder="Notes saved with the plan"></textarea>
+    <button id="export" class="primary" disabled>Export plan.json</button>
+    <p class="hint" id="exportMsg"></p>
+
+    <h2 id="robotH" hidden>Robot hand-off</h2>
+    <div id="robot" hidden></div>
+
+    <h2>Keys</h2>
+    <p class="hint">Scroll or PageUp/PageDown: move through slices. Arrow keys: nudge cursor 1 mm in the hovered view. Shift-drag: pan. Ctrl-scroll: zoom.</p>
+  </aside>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
