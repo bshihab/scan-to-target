@@ -19,7 +19,9 @@ async function loadArray(url, dtype) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   let buf = await r.arrayBuffer();
-  if (url.endsWith(".gz")) {
+  const head = new Uint8Array(buf, 0, 2);
+  // decompress only if the bytes are still gzip: some hosts decode .gz files on the way
+  if (head[0] === 0x1f && head[1] === 0x8b) {
     const ds = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
     buf = await new Response(ds).arrayBuffer();
   }
