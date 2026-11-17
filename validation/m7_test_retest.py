@@ -37,6 +37,22 @@ def peak_world(tmap_path, epi_to_t1):
     return T.apply(epi_to_t1, t.voxel_to_world(ijk)), float(t.data.max())
 
 
+def cluster_centroid_world(tmap_path, epi_to_t1, thr=3.1):
+    """t-weighted centre of mass of the connected supra-threshold cluster that
+    contains the peak (second target rule, PLAN.md)."""
+    from scipy import ndimage
+    t = Volume.from_nifti(tmap_path)
+    lab, _ = ndimage.label(t.data > thr)
+    pk = np.unravel_index(int(np.argmax(t.data)), t.shape3)
+    if lab[pk] == 0:
+        return None, 0
+    m = lab == lab[pk]
+    idx = np.argwhere(m).astype(float)
+    w = t.data[m]
+    c = (idx * w[:, None]).sum(0) / w.sum()
+    return T.apply(epi_to_t1, t.voxel_to_world(c)), int(m.sum())
+
+
 def process(sub, log=print):
     if not subject_paths(DATA, sub, "test")[0].exists() or not subject_paths(DATA, sub, "retest")[0].exists():
         subprocess.run([str(ROOT / "scripts/fetch_data.sh"), sub], check=True)
@@ -46,8 +62,12 @@ def process(sub, log=print):
         f = OUT / sub / f"ses-{ses}"
         A = np.load(f / "fmri/epi_to_t1.npy")
         p, tpk = peak_world(f / "fmri/tmap_finger.nii.gz", A)
+        cc, csize = cluster_centroid_world(f / "fmri/tmap_finger.nii.gz", A)
         summ = json.loads((f / "fmri/fmri_summary.json").read_text())
-        res[ses] = {"peak_t1_ras": p.tolist(), "peak_t": tpk, "peak_mni_approx": T.apply(np.load(f / "t1_to_mni.npy"), p).tolist(),
+        N = np.load(f / "t1_to_mni.npy")
+        res[ses] = {"peak_t1_ras": p.tolist(), "peak_t": tpk, "peak_mni_approx": T.apply(N, p).tolist(),
+                    "cluster_centroid_t1_ras": None if cc is None else cc.tolist(), "cluster_voxels": csize,
+                    "cluster_centroid_mni_approx": None if cc is None else T.apply(N, cc).tolist(),
                     "mean_fd_mm": summ["mean_fd_mm"], "max_fd_mm": summ["max_fd_mm"], "n_vox_t_gt_3_1": summ["n_vox_t_gt_3_1"]}
     t1_test = Volume.from_nifti(subject_paths(DATA, sub, "test")[0])
     t1_retest = Volume.from_nifti(subject_paths(DATA, sub, "retest")[0])
@@ -55,8 +75,13 @@ def process(sub, log=print):
     C = register_rigid(t1_test, t1_retest, metric="mi", fixed_mask=brain,
                        levels=(Level(8, 8, max_points=100000), Level(4, 4, max_points=100000),
                                Level(2, 2, max_points=100000, order=3))).matrix
+    np.save(OUT / sub / "t1_retest_to_test.npy", C)
+    res["t1_retest_to_test"] = C.tolist()
     retest_in_test = T.apply(C, np.array(res["retest"]["peak_t1_ras"]))
     res["distance_mm"] = float(np.linalg.norm(retest_in_test - np.array(res["test"]["peak_t1_ras"])))
+    if res["test"]["cluster_centroid_t1_ras"] and res["retest"]["cluster_centroid_t1_ras"]:
+        cr = T.apply(C, np.array(res["retest"]["cluster_centroid_t1_ras"]))
+        res["centroid_distance_mm"] = float(np.linalg.norm(cr - np.array(res["test"]["cluster_centroid_t1_ras"])))
     res["distance_mni_mm"] = float(np.linalg.norm(np.array(res["retest"]["peak_mni_approx"]) - np.array(res["test"]["peak_mni_approx"])))
     res["same_hemisphere"] = bool(np.sign(res["test"]["peak_mni_approx"][0]) == np.sign(res["retest"]["peak_mni_approx"][0]))
     return res
@@ -71,7 +96,8 @@ def main():
         try:
             rows[sub] = process(sub)
             r = rows[sub]
-            print(f"{sub}: distance {r['distance_mm']:.1f} mm (MNI {r['distance_mni_mm']:.1f}); "
+            print(f"{sub}: peak distance {r['distance_mm']:.1f} mm (MNI {r['distance_mni_mm']:.1f}), "
+                  f"cluster-centroid distance {r.get('centroid_distance_mm', float('nan')):.1f} mm; "
                   f"test MNI {np.round(r['test']['peak_mni_approx']).astype(int).tolist()} t={r['test']['peak_t']:.1f}; "
                   f"retest MNI {np.round(r['retest']['peak_mni_approx']).astype(int).tolist()} t={r['retest']['peak_t']:.1f}", flush=True)
         except Exception as e:
@@ -83,7 +109,10 @@ def main():
     ok = [r for r in rows.values() if "distance_mm" in r]
     if ok:
         d = np.array([r["distance_mm"] for r in ok])
-        print(f"M7: n={len(ok)} median {np.median(d):.1f} mm, under 10 mm: {(d < 10).sum()}/{len(d)}")
+        print(f"M7 peak rule: n={len(ok)} median {np.median(d):.1f} mm, under 10 mm: {(d < 10).sum()}/{len(d)}")
+        dc = np.array([r["centroid_distance_mm"] for r in ok if "centroid_distance_mm" in r])
+        if len(dc):
+            print(f"M7 cluster-centroid rule: n={len(dc)} median {np.median(dc):.1f} mm, under 10 mm: {(dc < 10).sum()}/{len(dc)}")
 
 
 if __name__ == "__main__":
