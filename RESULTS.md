@@ -90,13 +90,28 @@ The first B5 compared a JS matrix chain the viewer never ran with the same chain
 - `tests/viewer_phantom.mjs` renders a synthetic volume (flipped first axis, 7 degree tilt) with markers at the patient's left, front and top through the viewer's real rendering function, and checks screen positions against the radiological and neurological conventions, plus the edge letters, in axial, coronal and sagittal views. A single bright voxel is drawn centred at exactly the pixel position a click maps back to it (0.000 px). Swapping left and right fails 6 checks; going back to sampling pixel corners instead of centres (a half-pixel offset the review found) fails the click check.
 - In Chrome: target at the map peak, entry snapped to the scalp, plan exported; the server stores the target's voxel index in the original T1 file computed from its own copy of that file's matrix.
 
-## M7 test-retest of the target
+## M7 test-retest of the target (expectation not met)
 
 `python validation/m7_test_retest.py --delete-raw sub-01 ... sub-10`
 
 No pass bar. Expectation stated before running: under 10 mm for most subjects. Two target rules, both fixed before subjects 2-10 ran: the map's peak voxel, and the t-weighted centre of the cluster (t > 3.1) containing the peak. The retest target is carried into the test T1 by a T1-to-T1 registration inside the template brain mask.
 
-M7_TABLE
+| Subject | Peak rule, mm | Cluster rule, mm | Test peak, MNI approx (t) | Retest peak, MNI approx (t) | Same hemisphere | Mean FD test / retest, mm |
+|---|---|---|---|---|---|---|
+| sub-01 | 15.1 | 8.0 | (35, -18, 46) (6.2) | (48, -10, 57) (4.3) | yes | 0.22 / 0.23 |
+| sub-02 | 87.7 | 76.5 | (-46, -37, 67) (7.5) | (-22, 54, 40) (6.3) | yes | 0.25 / 0.21 |
+| sub-03 | 101.4 | 100.9 | (-24, -90, -30) (5.5) | (-50, -17, 61) (4.3) | yes | 0.15 / 0.13 |
+| sub-04 | 59.4 | 55.7 | (-76, 8, -4) (4.9) | (-65, -38, 37) (5.5) | yes | 0.17 / 0.13 |
+| sub-05 | 41.8 | 45.9 | (-52, -33, 66) (8.6) | (-58, -22, 41) (9.4) | yes | 0.15 / 0.15 |
+| sub-06 | 8.9 | 2.2 | (38, -18, 67) (6.3) | (36, -19, 57) (11.6) | yes | 0.12 / 0.16 |
+| sub-07 | 66.3 | 57.5 | (20, -43, 64) (7.9) | (-45, -11, 46) (9.7) | no | 0.21 / 0.16 |
+| sub-08 | 92.2 | 94.3 | (16, -52, -11) (8.6) | (-35, -19, 72) (6.6) | no | 0.14 / 0.16 |
+| sub-09 | 100.8 | 109.9 | (27, 23, 62) (4.9) | (-39, -55, -55) (5.3) | no | 0.21 / 0.13 |
+| sub-10 | 104.6 | 104.1 | (-22, -52, -23) (6.8) | (23, -4, 82) (7.7) | no | 0.11 / 0.12 |
+
+Peak rule: median 77.0 mm, under 10 mm for 1/10. Cluster rule: median 67.0 mm, under 10 mm for 2/10. The stated expectation (under 10 mm for most subjects) was not met by either rule.
+
+Where the peaks fell: 11 of the 20 session peaks are more than 25 mm from MNI (±37, -21, 58), taken here as the centre of the hand area of primary motor cortex; 5 of them are below z = 0 (cerebellum or the lower temporal or occipital lobe), the rest frontal or parietal. The cerebellum takes part in finger movement, so a cerebellar peak is a real response, just not a cortical target. The peak is in the opposite hemisphere between sessions for 4 of 10 subjects. The dataset paper does not say which hand was used (3 of the 10 are left-handed), so a hemisphere change cannot be judged as right or wrong from this data. Head motion was low throughout (mean framewise displacement 0.11-0.25 mm) and does not explain the large distances.
 
 MNI coordinates come from a 12-parameter affine and are good to several millimetres. sub-01's peak moved 15 mm between the OLS and AR(1) versions of the same GLM, which is why the second rule was added.
 
