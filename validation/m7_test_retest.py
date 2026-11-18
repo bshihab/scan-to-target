@@ -53,6 +53,40 @@ def cluster_centroid_world(tmap_path, epi_to_t1, thr=3.1):
     return T.apply(epi_to_t1, t.voxel_to_world(c)), int(m.sum())
 
 
+LOOP_MAX_MM = 5.0
+
+
+def rigid_from_templates(Nt, Nr):
+    """Rigid part of inv(Nt) @ Nr (retest T1 -> MNI -> test T1), fixed at the
+    template's brain centre. Used to start the T1-to-T1 registration."""
+    A = np.linalg.inv(Nt) @ Nr
+    U, _, Vt = np.linalg.svd(A[:3, :3])
+    R = U @ Vt
+    c = np.array([0.0, -18.0, 18.0])
+    p, q = T.apply(np.linalg.inv(Nr), c), T.apply(np.linalg.inv(Nt), c)
+    M = np.eye(4)
+    M[:3, :3], M[:3, 3] = R, q - R @ p
+    return M
+
+
+def t1_retest_to_test(t1_test, t1_retest, Nt, Nr):
+    """Rigid retest-T1 -> test-T1 inside the template brain mask. Two starts
+    (the template-implied answer and identity), lower cost kept. Loop check:
+    Nt @ C must agree with Nr within LOOP_MAX_MM over a 60 mm sphere of points,
+    since both map retest-T1 points into MNI (PLAN.md change log: one
+    identity-started run of sub-05 converged 54 mm away and nothing flagged it)."""
+    brain = template.brain_mask_in_t1(t1_test, Nt)
+    levels = (Level(8, 8, max_points=100000), Level(4, 4, max_points=100000), Level(2, 2, max_points=100000, order=3))
+    runs = {name: register_rigid(t1_test, t1_retest, metric="mi", fixed_mask=brain, init=init, levels=levels)
+            for name, init in (("templates", rigid_from_templates(Nt, Nr)), ("identity", np.eye(4)))}
+    best = min(runs, key=lambda k: runs[k].cost)
+    C = runs[best].matrix
+    P = T.sphere_points(np.array([0.0, -18.0, 18.0]), 60.0, 64)
+    loop = float(np.linalg.norm(T.apply(Nt @ C, T.apply(np.linalg.inv(Nr), P)) - P, axis=1).max())
+    return C, {"costs": {k: v.cost for k, v in runs.items()}, "start": best,
+               "loop_max_mm": loop, "loop_ok": loop <= LOOP_MAX_MM}
+
+
 def process(sub, log=print):
     if not subject_paths(DATA, sub, "test")[0].exists() or not subject_paths(DATA, sub, "retest")[0].exists():
         subprocess.run([str(ROOT / "scripts/fetch_data.sh"), sub], check=True)
@@ -71,10 +105,9 @@ def process(sub, log=print):
                     "mean_fd_mm": summ["mean_fd_mm"], "max_fd_mm": summ["max_fd_mm"], "n_vox_t_gt_3_1": summ["n_vox_t_gt_3_1"]}
     t1_test = Volume.from_nifti(subject_paths(DATA, sub, "test")[0])
     t1_retest = Volume.from_nifti(subject_paths(DATA, sub, "retest")[0])
-    brain = template.brain_mask_in_t1(t1_test, np.load(OUT / sub / "ses-test/t1_to_mni.npy"))
-    C = register_rigid(t1_test, t1_retest, metric="mi", fixed_mask=brain,
-                       levels=(Level(8, 8, max_points=100000), Level(4, 4, max_points=100000),
-                               Level(2, 2, max_points=100000, order=3))).matrix
+    Nt = np.load(OUT / sub / "ses-test/t1_to_mni.npy")
+    Nr = np.load(OUT / sub / "ses-retest/t1_to_mni.npy")
+    C, res["t1_registration"] = t1_retest_to_test(t1_test, t1_retest, Nt, Nr)
     np.save(OUT / sub / "t1_retest_to_test.npy", C)
     res["t1_retest_to_test"] = C.tolist()
     retest_in_test = T.apply(C, np.array(res["retest"]["peak_t1_ras"]))
@@ -96,7 +129,7 @@ def main():
         try:
             rows[sub] = process(sub)
             r = rows[sub]
-            print(f"{sub}: peak distance {r['distance_mm']:.1f} mm (MNI {r['distance_mni_mm']:.1f}), "
+            print(f"{sub}: T1 loop {r['t1_registration']['loop_max_mm']:.1f} mm ({r['t1_registration']['start']} start); peak distance {r['distance_mm']:.1f} mm (MNI {r['distance_mni_mm']:.1f}), "
                   f"cluster-centroid distance {r.get('centroid_distance_mm', float('nan')):.1f} mm; "
                   f"test MNI {np.round(r['test']['peak_mni_approx']).astype(int).tolist()} t={r['test']['peak_t']:.1f}; "
                   f"retest MNI {np.round(r['retest']['peak_mni_approx']).astype(int).tolist()} t={r['retest']['peak_t']:.1f}", flush=True)
@@ -106,7 +139,10 @@ def main():
         if delete_raw and sub != "sub-01":
             shutil.rmtree(DATA / sub, ignore_errors=True)
         out_file.write_text(json.dumps({"rows": sorted(rows.values(), key=lambda r: r["subject"])}, indent=2))
-    ok = [r for r in rows.values() if "distance_mm" in r]
+    ok = [r for r in rows.values() if "distance_mm" in r and r.get("t1_registration", {}).get("loop_ok")]
+    bad = [r["subject"] for r in rows.values() if "distance_mm" in r and not r.get("t1_registration", {}).get("loop_ok")]
+    if bad:
+        print("excluded, T1-to-T1 loop check failed:", ", ".join(bad))
     if ok:
         d = np.array([r["distance_mm"] for r in ok])
         print(f"M7 peak rule: n={len(ok)} median {np.median(d):.1f} mm, under 10 mm: {(d < 10).sum()}/{len(d)}")

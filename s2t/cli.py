@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -64,16 +65,28 @@ def run_subject(sub: str, ses: str, data: Path = ROOT / "data/ds000114", out_roo
         fmri.run(bold_path, events, fdir, log=log)
     t1 = Volume.from_nifti(t1_path)
     mni_file = fdir.parent / "t1_to_mni.npy"
-    if not mni_file.exists():
+    mni_info_file = fdir.parent / "t1_to_mni.json"
+    mni_info = json.loads(mni_info_file.read_text()) if mni_info_file.exists() else {}
+    if not mni_file.exists() or mni_info.get("method") != template.METHOD:
         log("aligning the MNI152 template to the T1 (affine, for the brain mask and MNI coordinates)")
-        np.save(mni_file, template.align_template(t1)[0])
+        N, mni_info = template.align_template(t1)
+        mni_info["method"] = template.METHOD
+        np.save(mni_file, N)
+        mni_info_file.write_text(json.dumps(mni_info, indent=2))
     t1_to_mni = np.load(mni_file)
+    if not mni_info.get("qc_ok"):
+        raise RuntimeError(f"{sub} ses-{ses}: template fit failed its plausibility check "
+                           f"(brain inside head {mni_info.get('qc_brain_inside_head', 0):.2f}, "
+                           f"volume {mni_info.get('qc_brain_volume_ml', 0):.0f} mL); refusing to build a scene on it")
     reg_file = fdir / "epi_to_t1.npy"
-    if not reg_file.exists():
+    reg_key_file = fdir / "epi_to_t1.json"
+    reg_key = {"t1_to_mni_sha256": hashlib.sha256(t1_to_mni.tobytes()).hexdigest()}
+    if not reg_file.exists() or not reg_key_file.exists() or json.loads(reg_key_file.read_text()) != reg_key:
         log("registering mean EPI to T1 (mutual information, then boundary-based)")
         brain = template.brain_mask_in_t1(t1, t1_to_mni)
         M = register_epi_to_t1_bbr(t1, Volume.from_nifti(fdir / "mean_epi.nii.gz"), brain).matrix
         np.save(reg_file, M)
+        reg_key_file.write_text(json.dumps(reg_key))
     M = np.load(reg_file)
     summ = json.loads(summary_file.read_text())
     sdir = out_root / "scenes" / f"{sub}_ses-{ses}"
