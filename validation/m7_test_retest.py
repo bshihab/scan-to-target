@@ -87,6 +87,30 @@ def t1_retest_to_test(t1_test, t1_retest, Nt, Nr):
                "loop_max_mm": loop, "loop_ok": loop <= LOOP_MAX_MM}
 
 
+EPI_LOOP_MAX_MM = 2.0
+
+
+def epi_loop(sub, C, t1_test, Nt):
+    """B4e(2): EPI_retest -> EPI_test -> T1_test against EPI_retest -> T1_retest
+    -> T1_test. The EPI-to-EPI registration starts from identity and from the
+    brain-mask centroid offset, never from the matrices under test."""
+    f = {ses: OUT / sub / f"ses-{ses}/fmri" for ses in ("test", "retest")}
+    mt, mr = Volume.from_nifti(f["test"] / "mean_epi.nii.gz"), Volume.from_nifti(f["retest"] / "mean_epi.nii.gz")
+    bt = Volume.from_nifti(f["test"] / "brain_mask.nii.gz").data > 0
+    br = Volume.from_nifti(f["retest"] / "brain_mask.nii.gz").data > 0
+    ct, cr = mt.voxel_to_world(np.argwhere(bt).mean(0)), mr.voxel_to_world(np.argwhere(br).mean(0))
+    shift = np.eye(4)
+    shift[:3, 3] = ct - cr
+    runs = {k: register_rigid(mt, mr, metric="ssd", fixed_mask=bt, init=i) for k, i in (("identity", np.eye(4)), ("centroid", shift))}
+    best = min(runs, key=lambda k: runs[k].cost)
+    Dm = runs[best].matrix
+    At, Ar = np.load(f["test"] / "epi_to_t1.npy"), np.load(f["retest"] / "epi_to_t1.npy")
+    pts = T.sphere_points(T.apply(np.linalg.inv(Nt), np.array([0.0, -18.0, 18.0])), 60.0, 64)
+    loop = T.transform_error_mm(At @ Dm, C @ Ar, pts)
+    return {"max_mm": float(loop.max()), "mean_mm": float(loop.mean()), "start": best,
+            "costs": {k: v.cost for k, v in runs.items()}, "passed": bool(loop.max() <= EPI_LOOP_MAX_MM)}
+
+
 def process(sub, log=print):
     if not subject_paths(DATA, sub, "test")[0].exists() or not subject_paths(DATA, sub, "retest")[0].exists():
         subprocess.run([str(ROOT / "scripts/fetch_data.sh"), sub], check=True)
@@ -110,6 +134,7 @@ def process(sub, log=print):
     C, res["t1_registration"] = t1_retest_to_test(t1_test, t1_retest, Nt, Nr)
     np.save(OUT / sub / "t1_retest_to_test.npy", C)
     res["t1_retest_to_test"] = C.tolist()
+    res["epi_loop"] = epi_loop(sub, C, t1_test, Nt)
     retest_in_test = T.apply(C, np.array(res["retest"]["peak_t1_ras"]))
     res["distance_mm"] = float(np.linalg.norm(retest_in_test - np.array(res["test"]["peak_t1_ras"])))
     if res["test"]["cluster_centroid_t1_ras"] and res["retest"]["cluster_centroid_t1_ras"]:
@@ -129,7 +154,7 @@ def main():
         try:
             rows[sub] = process(sub)
             r = rows[sub]
-            print(f"{sub}: T1 loop {r['t1_registration']['loop_max_mm']:.1f} mm ({r['t1_registration']['start']} start); peak distance {r['distance_mm']:.1f} mm (MNI {r['distance_mni_mm']:.1f}), "
+            print(f"{sub}: T1 loop {r['t1_registration']['loop_max_mm']:.1f} mm ({r['t1_registration']['start']} start), EPI loop {r['epi_loop']['max_mm']:.2f} mm; peak distance {r['distance_mm']:.1f} mm (MNI {r['distance_mni_mm']:.1f}), "
                   f"cluster-centroid distance {r.get('centroid_distance_mm', float('nan')):.1f} mm; "
                   f"test MNI {np.round(r['test']['peak_mni_approx']).astype(int).tolist()} t={r['test']['peak_t']:.1f}; "
                   f"retest MNI {np.round(r['retest']['peak_mni_approx']).astype(int).tolist()} t={r['retest']['peak_t']:.1f}", flush=True)
@@ -143,6 +168,9 @@ def main():
     bad = [r["subject"] for r in rows.values() if "distance_mm" in r and not r.get("t1_registration", {}).get("loop_ok")]
     if bad:
         print("excluded, T1-to-T1 loop check failed:", ", ".join(bad))
+    loops = [r for r in rows.values() if "epi_loop" in r]
+    print(f"B4e(2) EPI loop closure <= {EPI_LOOP_MAX_MM} mm: {sum(r['epi_loop']['passed'] for r in loops)}/{len(loops)}; "
+          f"subjects with errors: {[r['subject'] for r in rows.values() if 'error' in r]}")
     if ok:
         d = np.array([r["distance_mm"] for r in ok])
         print(f"M7 peak rule: n={len(ok)} median {np.median(d):.1f} mm, under 10 mm: {(d < 10).sum()}/{len(d)}")

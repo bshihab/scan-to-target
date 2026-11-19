@@ -53,10 +53,13 @@ def subject_paths(data: Path, sub: str, ses: str):
             data / "task-fingerfootlips_events.tsv")
 
 
+EPI_T1_METHOD = "bbr-two-starts-v4"  # cache key for epi_to_t1.npy
+
+
 def run_subject(sub: str, ses: str, data: Path = ROOT / "data/ds000114", out_root: Path = ROOT / "out", log=print) -> Path:
     from . import fmri, scene
     from . import template
-    from .register import register_epi_to_t1_bbr
+    from .register import epi_to_t1_qc, register_epi_to_t1_bbr
     from .volume import Volume
     t1_path, bold_path, events = subject_paths(Path(data), sub, ses)
     fdir = out_root / sub / f"ses-{ses}" / "fmri"
@@ -80,13 +83,22 @@ def run_subject(sub: str, ses: str, data: Path = ROOT / "data/ds000114", out_roo
                            f"volume {mni_info.get('qc_brain_volume_ml', 0):.0f} mL); refusing to build a scene on it")
     reg_file = fdir / "epi_to_t1.npy"
     reg_key_file = fdir / "epi_to_t1.json"
-    reg_key = {"t1_to_mni_sha256": hashlib.sha256(t1_to_mni.tobytes()).hexdigest()}
-    if not reg_file.exists() or not reg_key_file.exists() or json.loads(reg_key_file.read_text()) != reg_key:
-        log("registering mean EPI to T1 (mutual information, then boundary-based)")
+    reg_key = {"t1_to_mni_sha256": hashlib.sha256(t1_to_mni.tobytes()).hexdigest(), "method": EPI_T1_METHOD}
+    reg_info = json.loads(reg_key_file.read_text()) if reg_key_file.exists() else {}
+    if not reg_file.exists() or reg_info.get("key") != reg_key:
+        log("registering mean EPI to T1 (boundary-based, from the scanner alignment and from mutual information)")
         brain = template.brain_mask_in_t1(t1, t1_to_mni)
-        M = register_epi_to_t1_bbr(t1, Volume.from_nifti(fdir / "mean_epi.nii.gz"), brain).matrix
-        np.save(reg_file, M)
-        reg_key_file.write_text(json.dumps(reg_key))
+        mean_epi = Volume.from_nifti(fdir / "mean_epi.nii.gz")
+        r = register_epi_to_t1_bbr(t1, mean_epi, brain)
+        np.save(reg_file, r.matrix)
+        reg_info = {"key": reg_key, "start": r.info["start"], "costs": r.info["costs"],
+                    **epi_to_t1_qc(r.matrix, mean_epi, r.cost)}
+        reg_key_file.write_text(json.dumps(reg_info, indent=2))
+    if not reg_info.get("qc_ok"):
+        raise RuntimeError(f"{sub} ses-{ses}: EPI-to-T1 registration failed its plausibility check "
+                           f"(rotation {reg_info.get('rotation_from_scanner_deg', 0):.1f} deg, moved "
+                           f"{reg_info.get('moved_from_scanner_max_mm', 0):.1f} mm, cost {reg_info.get('bbr_cost', 0):.2f}); "
+                           "refusing to build a scene on it")
     M = np.load(reg_file)
     summ = json.loads(summary_file.read_text())
     sdir = out_root / "scenes" / f"{sub}_ses-{ses}"

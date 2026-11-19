@@ -31,7 +31,7 @@ def load_template():
 # stuck 100+ mm away (PLAN.md change log), so several are tried at the coarse
 # level and the best one is refined.
 START_HEIGHTS_MM = (0.0, 15.0, 30.0, 45.0, -15.0)
-METHOD = "multistart-heights-v2"  # cache key: fits made before this change are redone
+METHOD = "multistart-heights-qc-v3"  # cache key: fits made before this change are redone
 
 
 def align_template(t1: Volume, init: np.ndarray | None = None):
@@ -54,12 +54,26 @@ def align_template(t1: Volume, init: np.ndarray | None = None):
             s0[:3, 3] = c_mni - (c_t1 + np.array([0.0, 0.0, h]))
             starts.append(s0)
     coarse = [register_rigid(tv, t1, metric="mi", init=s0, levels=lv_coarse, fixed_mask=brain) for s0 in starts]
-    best = int(np.argmin([c.cost for c in coarse]))
-    r1 = register_rigid(tv, t1, metric="mi", init=coarse[best].matrix, levels=lv_r, fixed_mask=brain)
-    r2 = register_rigid(tv, t1, metric="mi", init=r1.matrix, levels=lv_a, fixed_mask=brain, dof=12)
-    info = {"start_costs": [c.cost for c in coarse], "best_start": best,
-            "rigid_cost": r1.cost, "affine_cost": r2.cost}
-    info.update(template_qc(t1, r2.matrix))
+    # Starts are refined in order of coarse cost and the first fit that passes
+    # the plausibility check is kept. The lowest coarse cost alone is not safe:
+    # for sub-07 ses-test it put the template brain in front of the face
+    # (PLAN.md change log).
+    tried = []
+    for k in np.argsort([c.cost for c in coarse]):
+        r1 = register_rigid(tv, t1, metric="mi", init=coarse[k].matrix, levels=lv_r, fixed_mask=brain)
+        r2 = register_rigid(tv, t1, metric="mi", init=r1.matrix, levels=lv_a, fixed_mask=brain, dof=12)
+        qc = template_qc(t1, r2.matrix)
+        tried.append({"start": int(k), "affine_cost": r2.cost, **qc})
+        if qc["qc_ok"]:
+            break
+    k = len(tried) - 1 if tried[-1]["qc_ok"] else int(np.argmin([t["affine_cost"] for t in tried]))
+    info = {"start_costs": [c.cost for c in coarse], "tried": tried, "best_start": tried[k]["start"],
+            "affine_cost": tried[k]["affine_cost"], **{q: tried[k][q] for q in ("qc_brain_inside_head", "qc_brain_volume_ml", "qc_ok")}}
+    # recompute the chosen matrix only if the loop ended on a failed one
+    if k != len(tried) - 1:
+        s0 = coarse[tried[k]["start"]].matrix
+        r1 = register_rigid(tv, t1, metric="mi", init=s0, levels=lv_r, fixed_mask=brain)
+        r2 = register_rigid(tv, t1, metric="mi", init=r1.matrix, levels=lv_a, fixed_mask=brain, dof=12)
     return r2.matrix, info
 
 

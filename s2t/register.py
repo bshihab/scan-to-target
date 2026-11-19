@@ -310,8 +310,36 @@ def register_bbr(t1: Volume, mean_epi: Volume, init: np.ndarray, t1_brain: np.nd
 
 def register_epi_to_t1_bbr(t1: Volume, mean_epi: Volume, t1_brain: np.ndarray,
                            init: np.ndarray | None = None) -> Result:
-    """The pipeline's fMRI-to-anatomy step (run 3 in PLAN.md)."""
-    # mutual information for the coarse alignment, then boundary-based refinement
-    if init is None:
-        init = register_epi_to_t1(t1, mean_epi).matrix
-    return register_bbr(t1, mean_epi, init, t1_brain)
+    """The pipeline's fMRI-to-anatomy step.
+
+    Boundary-based refinement from two starts, the scanner's own alignment
+    (identity: both images come from the same session) and the mutual-information
+    answer; the lower boundary cost is kept. Using only the MI start (run 3)
+    left 4 of 20 real sessions rotated 21-121 degrees, because MI between a
+    4 mm EPI and a T1 can lock onto the wrong structure (PLAN.md change log)."""
+    if init is not None:
+        return register_bbr(t1, mean_epi, init, t1_brain)
+    runs = {"scanner": register_bbr(t1, mean_epi, np.eye(4), t1_brain),
+            "mutual_information": register_bbr(t1, mean_epi, register_epi_to_t1(t1, mean_epi).matrix, t1_brain)}
+    best = min(runs, key=lambda k: runs[k].cost)
+    r = runs[best]
+    r.info = {"levels": r.levels, "start": best, "costs": {k: v.cost for k, v in runs.items()}}
+    return r
+
+
+# Plausibility gate for a same-session EPI-to-T1 answer (applied by the CLI
+# before building a scene). Set after seeing 8 real sessions: good answers had
+# boundary cost 0.61-0.71 and moved at most 9.7 mm / 4.7 degrees from the
+# scanner alignment; failures had cost 0.94-1.00.
+EPI_T1_MAX_DEG = 10.0
+EPI_T1_MAX_MM = 25.0
+EPI_T1_MAX_COST = 0.85
+
+
+def epi_to_t1_qc(matrix: np.ndarray, mean_epi: Volume, cost: float) -> dict:
+    from .transforms import rotation_angle_deg, sphere_points, apply
+    P = sphere_points(mean_epi.center_world(), 60.0, 64)
+    moved = float(np.linalg.norm(apply(matrix, P) - P, axis=1).max())
+    deg = float(rotation_angle_deg(matrix))
+    ok = deg <= EPI_T1_MAX_DEG and moved <= EPI_T1_MAX_MM and cost <= EPI_T1_MAX_COST
+    return {"moved_from_scanner_max_mm": moved, "rotation_from_scanner_deg": deg, "bbr_cost": float(cost), "qc_ok": bool(ok)}
