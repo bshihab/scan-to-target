@@ -46,25 +46,28 @@ The first version of the pipeline used OLS, which ignores the autocorrelation of
 
 ## B4a registration, known truth (pass)
 
-`python validation/b4_registration.py a`
+`python validation/b4_registration.py a` and `... d`. Runs 3 and d2 are the current method (two starts, PLAN.md change log 2026-11-18/19); the table further down keeps every run.
 
 30 pseudo-EPIs made from the T1 (inverted contrast inside the head, 4 mm grid, 30-slice slab, 6 mm blur, 3% noise, 15% bias field), each moved by a random rigid transform up to 10 degrees and 15 mm, registered back by mutual information from the scanner alignment.
 
-| Median | 95th percentile | Worst sphere point | Cases over 5 mm | Bar |
-|---|---|---|---|---|
-| 0.48 mm | 0.56 mm | 0.89 mm | 0 | pass (1.0 / 2.0 / 5.0 mm) |
+| Run | Median | 95th percentile | Worst sphere point | Cases over 5 mm | Bar |
+|---|---|---|---|---|---|
+| 3 (current) | 0.22 mm | 0.34 mm | 0.57 mm | 0 | pass (1.0 / 2.0 / 5.0 mm) |
+| d2 (current, with distortion) | 0.41 mm | 0.60 mm | 0.98 mm | 0 | pass |
 
-Run 1 (commit 272978d) used mutual information alone; about 5 s per registration. Started at the true answer, the fit still drifts about 0.48 mm, so the floor is a small bias in the cost rather than capture range.
+Run 1 (commit 272978d) used mutual information alone; about 5 s per registration (the current method takes about 20 s). Started at the true answer, the fit still drifts about 0.48 mm, so the floor is a small bias in the cost rather than capture range.
 
 | Run | Method | Pseudo-fMRI | Median | 95th pct | Worst point | Bar |
 |---|---|---|---|---|---|---|
 | 1 | mutual information | inverted T1 | 0.48 mm | 0.56 mm | 0.89 mm | pass |
 | 2 | template mask, MI, then boundary-based (the pipeline) | inverted T1 | 0.23 mm | 0.36 mm | 0.60 mm | pass |
-| d | the pipeline | inverted T1 with simulated EPI distortion and dropout | 0.33 mm | 0.64 mm | 1.10 mm | pass |
+| d | run-2 pipeline | inverted T1 with simulated EPI distortion and dropout | 0.33 mm | 0.64 mm | 1.10 mm | pass |
+| 3 | boundary-based from two starts, scanner alignment and MI (the current pipeline) | inverted T1 | 0.22 mm | 0.34 mm | 0.57 mm | pass |
+| d2 | the current pipeline | inverted T1 with simulated EPI distortion and dropout | 0.41 mm | 0.60 mm | 0.98 mm | pass |
 
 Run 2 is partly circular, as the review pointed out: the pseudo-fMRI is an inverted copy of the same T1 whose white-matter surface drives the boundary cost, with no EPI distortion, so its 0.23 mm is optimistic. Bar B4a-d (written before it ran) adds a 4 mm displacement along the phase-encode axis over orbitofrontal cortex and 2.5 mm over each temporal pole, 70% signal dropout there, and a non-linear contrast; the error is still measured against the known rigid transform. It is still easier than real data (the real fMRI has a dark scalp and heavier inferior signal loss; `out/figs/pseudo_epi_distortion.png`).
 
-## B4b registration on real data (run 1 fail, run 2 fail, run 3 partly pass)
+## B4b registration on real data, sub-01 (run 1 fail, run 2 fail, runs 3 and 4 partly pass)
 
 `python validation/b4_registration.py b`
 
@@ -75,10 +78,21 @@ Run 1 ran at commit 272978d, run 2 on uncommitted code between 272978d and 14f0e
 | 1 | mutual information, whole head | not measured | not measured | 20.4 / 21.4 mm: fail |
 | 2 | mutual information, scalp stripped by erosion | 3.60 / 0.65 mm: fail | not measured | 13.7 / 3.3 mm: fail |
 | 3 | template brain mask, mutual information, then boundary-based | 0.001 / 0.001 mm: pass | 0.91 mm max, 0.68 mean: pass | 9.2 / 10.6 mm: fail |
+| 4 | boundary-based from two starts (current) | 0.00 / 0.00 mm: pass | 1.23 mm max, 0.79 mean: pass | 9.0 / 10.4 mm: fail |
 
 (test / retest session.) Start spread: refinements from the scanner alignment, the run-1 answer and the run-2 answer. Loop closure: EPI_retest to T1_retest to T1_test against EPI_retest to EPI_test to T1_test, where the T1-T1 and EPI-EPI steps are within one contrast; the head moved 6.8 and 8.9 degrees between sessions, so the loop is not trivially short.
 
 What this shows and what it doesn't. A start spread of 0.001 mm shows the optimizer is deterministic and lands in one basin from all three starts; it says nothing about accuracy by itself. Run 3 converges to one answer from very different starts, and the two sessions' answers are consistent with each other through independent within-contrast registrations to under a millimetre. It moved the EPI 5.6 mm (test) and 1.2 mm (retest) from the scanner's own alignment, and 5-7 mm from the run-1 and run-2 mutual-information answers. SimpleITK's mutual-information registration, configured as in PLAN.md, disagrees by about 10 mm; overlays from run 1 (`out/figs/b4b_test_overlays.png`) show its answer pulled onto the scalp, and boundary-based refinement started from its answer stops at a much worse cost (0.96 against 0.70). That is evidence about SimpleITK's setup here, not proof that ours is right; the B4b SimpleITK bar is reported as failed.
+
+B4b was only ever run on sub-01, and sub-01 happened to be a subject where the run-3 method worked. M7 later showed it failing on other subjects; B4e below is the check across all of them.
+
+## B4e registration across all 20 real sessions (fail: 9/10 loop closures)
+
+Bar written before the run (PLAN.md change log 2026-11-18/19), judged on M7 run 3. (1) Every session passes the template-fit and EPI-to-T1 plausibility gates. (2) In every subject the cross-session loop closes within 2.0 mm (B4b(c)'s bar), with the EPI-to-EPI step started from identity and from the brain-mask centroid offset, never from the matrices under test.
+
+What prompted it: in M7 runs 1 and 2, 4 of 20 sessions had EPI-to-T1 answers rotated 21-121 degrees from the scanner alignment and 3 more 13-18 degrees, with nothing flagging them. Run 3 (the B4b method) started boundary-based refinement only from the mutual-information answer, which locked onto the wrong structure in those sessions.
+
+Result. (1) 20/20 sessions pass both gates: boundary cost 0.55-0.71, at most 7.5 degrees and 15.7 mm from the scanner alignment; one template fit (sub-07 test) needed its second start. (2) 9/10 subjects close the loop within 2.0 mm; sub-03 closes at 2.12 mm (mean 1.42 mm). By the bar as written, B4e fails. The loop values per subject are in the M7 table below (median 0.98 mm, range 0.63-2.12 mm). The gate thresholds were set after seeing 8 of these sessions, so (1) is weaker evidence than (2).
 
 ## B5 viewer geometry (pass, rebuilt after the review)
 
@@ -90,32 +104,39 @@ The first B5 compared a JS matrix chain the viewer never ran with the same chain
 - `tests/viewer_phantom.mjs` renders a synthetic volume (flipped first axis, 7 degree tilt) with markers at the patient's left, front and top through the viewer's real rendering function, and checks screen positions against the radiological and neurological conventions, plus the edge letters, in axial, coronal and sagittal views. A single bright voxel is drawn centred at exactly the pixel position a click maps back to it (0.000 px). Swapping left and right fails 6 checks; going back to sampling pixel corners instead of centres (a half-pixel offset the review found) fails the click check.
 - In Chrome: target at the map peak, entry snapped to the scalp, plan exported; the server stores the target's voxel index in the original T1 file computed from its own copy of that file's matrix.
 
-## M7 test-retest of the target (expectation not met)
+## M7 test-retest of the target (expectation not met by the whole-brain rules; hand-area cluster rule 8/10 under 10 mm)
 
-`python validation/m7_test_retest.py --delete-raw sub-01 ... sub-10`
+`python validation/m7_test_retest.py --delete-raw sub-01 ... sub-10`, then `python validation/m7_hand_roi.py`
 
-No pass bar. Expectation stated before running: under 10 mm for most subjects. Two target rules, both fixed before subjects 2-10 ran: the map's peak voxel, and the t-weighted centre of the cluster (t > 3.1) containing the peak. The retest target is carried into the test T1 by a T1-to-T1 registration inside the template brain mask.
+No pass bar. Expectation stated before running: under 10 mm for most subjects. Three target rules, each fixed before it was computed: (1) the finger map's peak voxel in the whole brain; (2) the t-weighted centre of the cluster (t > 3.1) containing that peak; (3) the same two inside the hand area only: 20 mm spheres around MNI (-37, -21, 58) and (37, -21, 58), hemisphere chosen by the larger summed peak t across both sessions (3a peak, 3b cluster centre). The retest target is carried into the test T1 by a rigid T1-to-T1 registration inside the template brain mask.
 
-| Subject | Peak rule, mm | Cluster rule, mm | Test peak, MNI approx (t) | Retest peak, MNI approx (t) | Same hemisphere | Mean FD test / retest, mm |
-|---|---|---|---|---|---|---|
-| sub-01 | 15.1 | 8.0 | (35, -18, 46) (6.2) | (48, -10, 57) (4.3) | yes | 0.22 / 0.23 |
-| sub-02 | 87.7 | 76.5 | (-46, -37, 67) (7.5) | (-22, 54, 40) (6.3) | yes | 0.25 / 0.21 |
-| sub-03 | 101.4 | 100.9 | (-24, -90, -30) (5.5) | (-50, -17, 61) (4.3) | yes | 0.15 / 0.13 |
-| sub-04 | 59.4 | 55.7 | (-76, 8, -4) (4.9) | (-65, -38, 37) (5.5) | yes | 0.17 / 0.13 |
-| sub-05 | 41.8 | 45.9 | (-52, -33, 66) (8.6) | (-58, -22, 41) (9.4) | yes | 0.15 / 0.15 |
-| sub-06 | 8.9 | 2.2 | (38, -18, 67) (6.3) | (36, -19, 57) (11.6) | yes | 0.12 / 0.16 |
-| sub-07 | 66.3 | 57.5 | (20, -43, 64) (7.9) | (-45, -11, 46) (9.7) | no | 0.21 / 0.16 |
-| sub-08 | 92.2 | 94.3 | (16, -52, -11) (8.6) | (-35, -19, 72) (6.6) | no | 0.14 / 0.16 |
-| sub-09 | 100.8 | 109.9 | (27, 23, 62) (4.9) | (-39, -55, -55) (5.3) | no | 0.21 / 0.13 |
-| sub-10 | 104.6 | 104.1 | (-22, -52, -23) (6.8) | (23, -4, 82) (7.7) | no | 0.11 / 0.12 |
+This is run 3. Runs 1 and 2 had registration failures that nothing caught at the time (one T1-to-T1 registration 54 mm off, one template fit 100+ mm off, and EPI-to-T1 answers rotated up to 121 degrees in 4 sessions); every number in them is superseded, and both are kept in `out/m7_run1.json` and `out/m7_run2.json`. See B4e and the PLAN.md change log.
 
-Peak rule: median 77.0 mm, under 10 mm for 1/10. Cluster rule: median 67.0 mm, under 10 mm for 2/10. The stated expectation (under 10 mm for most subjects) was not met by either rule.
+| Subject | Rule 1, mm | Rule 2, mm | Hand-area hemisphere | Rule 3a, mm | Rule 3b, mm | Whole-brain peak, MNI approx, test / retest | T1 loop, mm | EPI loop, mm |
+|---|---|---|---|---|---|---|---|---|
+| sub-01 | 15.1 | 7.8 | right | 15.1 | 7.4 | (35, -18, 47) / (48, -10, 57) | 0.4 | 1.42 |
+| sub-02 | 87.9 | 76.7 | left | 19.3 | 2.1 | (-46, -37, 67) / (-22, 54, 40) | 0.5 | 0.73 |
+| sub-03 | 101.8 | 101.2 | left | 21.8 | 19.9 | (-24, -90, -30) / (-50, -17, 61) | 0.3 | 2.12 |
+| sub-04 | 59.3 | 55.4 | left | 31.6 | 32.0 | (-76, 8, -4) / (-61, -28, 47) | 0.3 | 0.63 |
+| sub-05 | 14.9 | 7.2 | left | 11.8 | 2.3 | (-52, -33, 66) / (-54, -23, 54) | 0.5 | 0.92 |
+| sub-06 | 13.0 | 4.8 | right | 13.0 | 3.7 | (36, -13, 71) / (36, -19, 56) | 1.0 | 1.16 |
+| sub-07 | 89.7 | 83.4 | left | 3.4 | 1.5 | (21, -53, -20) / (-41, -16, 61) | 0.7 | 0.69 |
+| sub-08 | 92.0 | 94.1 | left | 19.6 | 1.7 | (16, -52, -11) / (-35, -19, 72) | 0.9 | 1.64 |
+| sub-09 | 77.0 | 83.1 | left | 11.5 | 3.6 | (27, 23, 62) / (-39, -19, 55) | 0.3 | 0.81 |
+| sub-10 | 104.5 | 104.0 | right | 12.8 | 0.9 | (-22, -52, -23) / (23, -4, 82) | 0.8 | 1.04 |
 
-Where the peaks fell: 11 of the 20 session peaks are more than 25 mm from MNI (±37, -21, 58), taken here as the centre of the hand area of primary motor cortex; 5 of them are below z = 0 (cerebellum or the lower temporal or occipital lobe), the rest frontal or parietal. The cerebellum takes part in finger movement, so a cerebellar peak is a real response, just not a cortical target. The peak is in the opposite hemisphere between sessions for 4 of 10 subjects. The dataset paper does not say which hand was used (3 of the 10 are left-handed), so a hemisphere change cannot be judged as right or wrong from this data. Head motion was low throughout (mean framewise displacement 0.11-0.25 mm) and does not explain the large distances.
+| Rule | Median | Under 10 mm |
+|---|---|---|
+| 1, whole-brain peak | 82.5 mm | 0/10 |
+| 2, whole-brain cluster centre | 79.9 mm | 3/10 |
+| 3a, hand-area peak | 14.0 mm | 1/10 |
+| 3b, hand-area cluster centre | 3.0 mm | 8/10 |
 
-MNI coordinates come from a 12-parameter affine and are good to several millimetres. sub-01's peak moved 15 mm between the OLS and AR(1) versions of the same GLM, which is why the second rule was added.
+What this says. Taking the strongest point of the finger map anywhere in the brain does not give a reproducible target: 9 of the 20 session peaks are more than 25 mm from the hand area, 5 of them below z = 0 (cerebellum or the lower temporal or occipital lobe), and the whole-brain peak changes hemisphere between sessions for 4 of 10 subjects. The cerebellum does take part in finger movement, so those are real responses, just not cortical targets. Restricted to the hand area, the single peak voxel still moves a median 14 mm, but the centre of the active cluster around it lands within 10 mm in 8 of 10 subjects (median 3.0 mm; sub-03 19.9 mm and sub-04 32.0 mm are the exceptions). Head motion was low throughout (mean framewise displacement 0.11-0.25 mm).
 
-An earlier draft of this file argued from sub-01's right-hemisphere motor peak and left-cerebellum response that the subject tapped with the left hand. The review pointed out that a left-right flipped image would look exactly the same, so that inference is withdrawn. The dataset paper does not say which hand was used.
+Caveats. Rule 3 confines the answer to two 40 mm spheres, so it measures reproducibility inside the hand area, not whether the map finds the hand area unaided; a planner would need that anatomical prior. The dataset paper does not say which hand was tapped (3 of the 10 are left-handed), so the hemisphere cannot be checked. MNI coordinates come from a 12-parameter affine and are good to several millimetres. sub-01's peak moved 15 mm between the OLS and AR(1) versions of the same GLM, which is why rule 2 was added.
+
+An earlier draft of this file argued from sub-01's right-hemisphere motor peak and left-cerebellum response that the subject tapped with the left hand. The review pointed out that a left-right flipped image would look exactly the same, so that inference is withdrawn.
 
 ## M8 Google Cloud DICOMweb round trip (pass)
 

@@ -11,7 +11,7 @@ Measured results, including failed runs, are in [RESULTS.md](RESULTS.md). The pl
 | 1. Ingest | DICOM series to a 3D or 4D volume with its voxel-to-patient matrix (stacks, time series, Siemens mosaics, compressed transfer syntaxes); refuses gantry tilt, uneven spacing, missing slices, mixed orientations and mixed echoes with the reason | done: voxel-identical to dcm2niix on 29 real series |
 | 2. Motion correction | Rigid realignment of each fMRI volume, after dropping non-steady-state volumes | done |
 | 3. Motor map | GLM on the finger/foot/lips blocks with an AR(1) noise model; t-map for finger > mean(foot, lips) | done: matches nilearn at r = 0.99997 |
-| 4. Fusion | MNI152 template alignment for a brain mask, then fMRI to T1 by mutual information followed by boundary-based registration | done, with one failed bar (see below) |
+| 4. Fusion | MNI152 template alignment for a brain mask, then fMRI to T1 by boundary-based registration from two starts; plausibility gates refuse a bad fit | done, with two failed bars (see below) |
 | 5. Planning GUI | Browser viewer: three orthogonal slices, the fMRI map, target and entry placement, a slice along the path and one across it at a chosen depth | done, tested in Chrome |
 | 6. Robot hand-off | Point-based registration from image to a simulated robot frame, with Fitzpatrick's predicted target error | done (simulated tracker) |
 | 7. Cloud storage | Upload, search and retrieve through DICOMweb (Google Cloud Healthcare or any DICOMweb server) | done: 608 instances uploaded to a Google Cloud Healthcare DICOM store, found, retrieved byte-identical and reloaded to the same voxels |
@@ -26,7 +26,7 @@ Measured results, including failed runs, are in [RESULTS.md](RESULTS.md). The pl
                 ├─ ingest ─► T1 ──── MNI152 template (affine) ─► brain mask, approximate MNI coordinates
  NIfTI files ───┘           fMRI ─ drop non-steady volumes ─ realign ─ GLM, AR(1) ─► t-map
                                                      │
-                            mean fMRI ─ mutual information ─ boundary-based refinement ─► fMRI-to-T1 matrix
+      mean fMRI ─ boundary-based, from scanner alignment and from mutual information ─ gate ─► fMRI-to-T1 matrix
                                                      │
                                        planning GUI: target and entry on the T1
                                                      │
@@ -68,12 +68,13 @@ Each bar was written in PLAN.md before the run it judges. When a run failed and 
 | B1, B1c | Does the DICOM reader match dcm2niix on real series, and refuse a tilted CT? | 29/29 voxel-identical, corners within 7e-5 mm; CT refused for its 18.5 degree tilt |
 | B2 | Does motion correction recover known head motion? | median 0.075 mm, max 0.23 mm (third run; two failed runs logged) |
 | B3 | Does the GLM match nilearn with the same model? | r = 0.99997, same peak voxel (AR(1) and OLS) |
-| B4a | Is a known fMRI-to-T1 transform recovered? | median 0.33 mm, worst point 1.1 mm, with simulated EPI distortion and dropout (0.23 mm without) |
-| B4b | On real data, is the registration stable and self-consistent? | same answer from three starts; cross-session loop closes to 0.91 mm; SimpleITK disagrees by about 10 mm (bar failed, see RESULTS.md) |
+| B4a | Is a known fMRI-to-T1 transform recovered? | median 0.41 mm, worst point 0.98 mm, with simulated EPI distortion and dropout (0.22 mm without) |
+| B4b | On one subject's real data, is the registration stable and self-consistent? | same answer from every start; cross-session loop closes to 1.23 mm; SimpleITK disagrees by about 10 mm (bar failed) |
+| B4e | Does registration hold on all 20 real sessions? | all 20 pass the plausibility gates; loop closes within 2 mm in 9 of 10 subjects, the tenth at 2.12 mm (bar failed). Added after earlier runs had silent failures on other subjects |
 | B5 | Does the viewer draw and export the right coordinates? | matches values recomputed from the source files to 1e-13; left-right phantom passes in both display conventions |
 | B6 | Does the predicted target error match simulation? | within 0.6% for four fiducial layouts |
 | M8 | Does a Google Cloud DICOMweb round trip preserve the files? | 608/608 instances byte-identical, same voxels and matrix after retrieval |
-| M7 | Does the planned target land in the same place on two days? | see RESULTS.md (10 subjects) |
+| M7 | Does the planned target land in the same place on two days? | no pass bar. Whole-brain peak: median 82 mm apart. Centre of the active cluster inside the hand area: median 3.0 mm, under 10 mm in 8 of 10 subjects |
 
 ## Limits
 
@@ -83,7 +84,8 @@ Each bar was written in PLAN.md before the run it judges. When a run failed and 
 - Left and right come from the scan headers. The code's own handling is tested (DICOM references, an orientation phantom in the viewer), but nothing in this dataset can confirm the headers themselves; a real system would check a lateral marker on the scan.
 - The robot and its tracker are simulated: a random rigid pose plus Gaussian noise on six scalp fiducials.
 - The server checks a plan against the scene it was built from (the T1's sha256 recorded at build time, the voxel index recomputed from the original T1 matrix, RAS and LPS consistency). It does not re-hash the scan on disk.
-- The GUI suggests the map's peak; a person decides where the target goes.
+- The GUI suggests the map's peak; a person decides where the target goes. The whole-brain peak is not a reproducible target (M7): it often falls in the cerebellum or outside motor cortex. Only the cluster centre inside the hand area was reproducible, and that relies on an anatomical prior.
+- The pipeline refuses to build a planning scene when the template fit or the fMRI-to-T1 registration fails a plausibility check (brain volume and position; rotation and shift from the scanner's own alignment, boundary cost). The thresholds were set from this dataset.
 
 ## Running it
 
