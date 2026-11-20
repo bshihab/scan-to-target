@@ -60,7 +60,7 @@ def run_subject(sub: str, ses: str, data: Path = ROOT / "data/ds000114", out_roo
     from . import fmri, scene
     from . import template
     from .register import epi_to_t1_qc, register_epi_to_t1_bbr
-    from .volume import Volume
+    from .volume import Volume, sha256
     t1_path, bold_path, events = subject_paths(Path(data), sub, ses)
     fdir = out_root / sub / f"ses-{ses}" / "fmri"
     summary_file = fdir / "fmri_summary.json"
@@ -70,10 +70,14 @@ def run_subject(sub: str, ses: str, data: Path = ROOT / "data/ds000114", out_roo
     mni_file = fdir.parent / "t1_to_mni.npy"
     mni_info_file = fdir.parent / "t1_to_mni.json"
     mni_info = json.loads(mni_info_file.read_text()) if mni_info_file.exists() else {}
-    if not mni_file.exists() or mni_info.get("method") != template.METHOD:
+    t1_sha = sha256(t1_path)
+    # cached results are keyed on their inputs' content as well as the method,
+    # so a changed T1 or mean EPI can never reuse an old matrix or gate verdict
+    if not mni_file.exists() or mni_info.get("method") != template.METHOD or mni_info.get("t1_sha256") != t1_sha:
         log("aligning the MNI152 template to the T1 (affine, for the brain mask and MNI coordinates)")
         N, mni_info = template.align_template(t1)
         mni_info["method"] = template.METHOD
+        mni_info["t1_sha256"] = t1_sha
         np.save(mni_file, N)
         mni_info_file.write_text(json.dumps(mni_info, indent=2))
     t1_to_mni = np.load(mni_file)
@@ -83,7 +87,8 @@ def run_subject(sub: str, ses: str, data: Path = ROOT / "data/ds000114", out_roo
                            f"volume {mni_info.get('qc_brain_volume_ml', 0):.0f} mL); refusing to build a scene on it")
     reg_file = fdir / "epi_to_t1.npy"
     reg_key_file = fdir / "epi_to_t1.json"
-    reg_key = {"t1_to_mni_sha256": hashlib.sha256(t1_to_mni.tobytes()).hexdigest(), "method": EPI_T1_METHOD}
+    reg_key = {"t1_to_mni_sha256": hashlib.sha256(t1_to_mni.tobytes()).hexdigest(), "method": EPI_T1_METHOD,
+               "mean_epi_sha256": sha256(fdir / "mean_epi.nii.gz")}
     reg_info = json.loads(reg_key_file.read_text()) if reg_key_file.exists() else {}
     if not reg_file.exists() or reg_info.get("key") != reg_key:
         log("registering mean EPI to T1 (boundary-based, from the scanner alignment and from mutual information)")

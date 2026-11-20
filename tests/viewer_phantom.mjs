@@ -61,6 +61,17 @@ for (const radio of [true, false]) {
   check(n > 0 && (radio ? x > C + 30 : x < C - 30), `${radio ? "radiological" : "neurological"} probe view: patient-left marker on screen ${radio ? "right" : "left"} (x=${x.toFixed(1)})`);
 }
 
+// An oblique hand-knob path: moving the entry 2 mm front-to-back must not mirror
+// the probe view (second review: the flip used to key on the side axis's x).
+for (const radio of [true, false]) {
+  const a = G.trajectoryBasis([-70, -19, 90], [-40, -20, 55], radio).probe;
+  const b = G.trajectoryBasis([-70, -21, 90], [-40, -20, 55], radio).probe;
+  check(G.dot(a.u, b.u) > 0.99 && G.dot(a.v, b.v) > 0.99 && G.edgeLetters(a).join("") === G.edgeLetters(b).join(""),
+        `${radio ? "radiological" : "neurological"} probe view of an oblique path stays the same when the entry moves 2 mm`);
+  const h = G.dot(G.cross(a.u, a.v), a.n);
+  check(radio ? h > 0.99 : h < -0.99, `${radio ? "radiological" : "neurological"} probe view seen from the ${radio ? "target" : "entry"} side`);
+}
+
 // The along view's vertical axis must not change with the display convention.
 {
   const a = G.trajectoryBasis([5, 3, 60], [0, 0, 0], true).along.v, b = G.trajectoryBasis([5, 3, 60], [0, 0, 0], false).along.v;

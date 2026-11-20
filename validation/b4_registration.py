@@ -203,7 +203,9 @@ def part_b():
                      "ours_vs_run2_mean_mm": float(T.transform_error_mm(ours, starts["run2"], pts).mean()),
                      "seconds_ours": t_ours, "ours_matrix": ours.tolist(), "sitk_matrix": theirs.tolist(),
                      "passed_b_spread": bool(spread <= 1.0), "passed_d_sitk": bool(d.max() <= 2.0)})
-        np.save(ROOT / f"out/sub-01/ses-{ses}/fmri/epi_to_t1.npy", ours)
+        # kept apart from the pipeline's cached matrix (fmri/epi_to_t1.npy), whose
+        # epi_to_t1.json key and gate record describe the pipeline's own run
+        np.save(ROOT / f"out/b4b_epi_to_t1_{ses}.npy", ours)
         print(f"  b {ses}: start spread {spread:.2f} mm; vs SimpleITK max {d.max():.2f} mm; EPI moved "
               f"{rows[-1]['ours_vs_scanner_alignment_mean_mm']:.2f} mm from the scanner alignment", flush=True)
 
@@ -214,14 +216,16 @@ def part_b():
                                Level(2, 2, max_points=100000, order=3))).matrix  # T1_retest -> T1_test
     epi_mask = nib.load(str(ROOT / "out/sub-01/ses-test/fmri/brain_mask.nii.gz")).get_fdata() > 0.5
     D = register_rigid(means["test"], means["retest"], metric="ssd", fixed_mask=epi_mask).matrix  # EPI_retest -> EPI_test
-    pts = T.sphere_points(brain_center(t1s["test"]), 60.0, 64)
+    # both sides act on retest-EPI points, so the sphere sits in the retest frame
+    # (it was centred on the test T1's brain before the second review; run 5 fixes it)
+    pts = T.sphere_points(brain_center(t1s["retest"]), 60.0, 64)
     loop = T.transform_error_mm(A["test"] @ D, C @ A["retest"], pts)
     loop_info = {"max_mm": float(loop.max()), "mean_mm": float(loop.mean()), "passed_c_loop": bool(loop.max() <= 2.0),
                  "t1_retest_to_test_rotation_deg": T.rotation_angle_deg(C),
                  "epi_retest_to_test_rotation_deg": T.rotation_angle_deg(D)}
     print(f"  b loop closure: max {loop.max():.2f} mm, mean {loop.mean():.2f} mm", flush=True)
     passed = all(r["passed_b_spread"] for r in rows) and loop_info["passed_c_loop"]
-    return {"run": 3, "rows": rows, "loop_closure": loop_info,
+    return {"run": 5, "rows": rows, "loop_closure": loop_info,
             "passed_b_and_c": bool(passed), "passed_d_sitk": all(r["passed_d_sitk"] for r in rows),
             "passed": bool(passed and all(r["passed_d_sitk"] for r in rows))}
 

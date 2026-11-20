@@ -88,16 +88,21 @@ export function planeBasis(view, radiological = true) {
 // Planes defined by a trajectory from entry to target.
 // "along": contains the trajectory; its in-plane perpendicular is chosen as
 // close to superior (or anterior if the path is vertical) as possible.
-// "probe": perpendicular to the trajectory, what the tip would see.
-// The probe view follows the same left-right convention as the main views:
-// in radiological mode its screen-right axis points to the patient's left.
+// "probe": perpendicular to the trajectory.
+// The display convention sets which way the probe view is seen, the same way it
+// does for an axial slice: radiological looks from the target back toward the
+// entry (for a downward path, like an axial slice seen from the feet, patient's
+// left on screen right); neurological looks from the entry along the path.
+// This depends only on the path's direction, so the view never mirrors itself
+// as the entry moves. (Keying the flip on the side axis's x component did: for
+// an oblique path that component is the path's small front-back tilt.)
 export function trajectoryBasis(entry, target, radiological = true) {
   const d = unit(sub(target, entry));
   const ref = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0];
   const side0 = unit(cross(d, ref));
   const up = cross(side0, d); // chosen before any flip, so "up" never depends on the display convention
-  const flip = (radiological && side0[0] > 0) || (!radiological && side0[0] < 0);
-  const side = flip ? scale(side0, -1) : side0;
+  // cross(side0, up) = -d, so negating side0 makes cross(side, up) = d (viewer looks along -d)
+  const side = radiological ? scale(side0, -1) : side0;
   return { along: { u: d, v: up, n: side0 }, probe: { u: side, v: up, n: d }, dir: d };
 }
 

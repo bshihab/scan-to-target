@@ -69,12 +69,12 @@ Each bar was written in PLAN.md before the run it judges. When a run failed and 
 | B2 | Does motion correction recover known head motion? | median 0.075 mm, max 0.23 mm (third run; two failed runs logged) |
 | B3 | Does the GLM match nilearn with the same model? | r = 0.99997, same peak voxel (AR(1) and OLS) |
 | B4a | Is a known fMRI-to-T1 transform recovered? | median 0.41 mm, worst point 0.98 mm, with simulated EPI distortion and dropout (0.22 mm without) |
-| B4b | On one subject's real data, is the registration stable and self-consistent? | same answer from every start; cross-session loop closes to 1.23 mm; SimpleITK disagrees by about 10 mm (bar failed) |
-| B4e | Does registration hold on all 20 real sessions? | all 20 pass the plausibility gates; loop closes within 2 mm in 9 of 10 subjects, the tenth at 2.12 mm (bar failed). Added after earlier runs had silent failures on other subjects |
+| B4b | On one subject's real data, is the registration stable and self-consistent? | same answer from every start; cross-session loop closes to 1.40 mm; SimpleITK disagrees by about 10 mm (bar failed) |
+| B4e | Does registration hold on all 20 real sessions? | all 20 pass the plausibility gates; loop closes within 2 mm in 9 of 10 subjects, the tenth at 2.21 mm (bar failed). Added after earlier runs had silent failures on other subjects |
 | B5 | Does the viewer draw and export the right coordinates? | matches values recomputed from the source files to 1e-13; left-right phantom passes in both display conventions |
 | B6 | Does the predicted target error match simulation? | within 0.6% for four fiducial layouts |
 | M8 | Does a Google Cloud DICOMweb round trip preserve the files? | 608/608 instances byte-identical, same voxels and matrix after retrieval |
-| M7 | Does the planned target land in the same place on two days? | no pass bar. Whole-brain peak: median 82 mm apart. Centre of the active cluster inside the hand area: median 3.0 mm, under 10 mm in 8 of 10 subjects |
+| M7 | Does the planned target land in the same place on two days? | no pass bar. Whole-brain peak: median 82 mm apart. Centre of the active cluster inside the hand area: median 3.0 mm, under 10 mm in 8 of 10 subjects, but the region itself sets a floor: cluster centres of two different people are a median 9.7 mm apart, half of them under 10 mm |
 
 ## Limits
 
@@ -84,7 +84,7 @@ Each bar was written in PLAN.md before the run it judges. When a run failed and 
 - Left and right come from the scan headers. The code's own handling is tested (DICOM references, an orientation phantom in the viewer), but nothing in this dataset can confirm the headers themselves; a real system would check a lateral marker on the scan.
 - The robot and its tracker are simulated: a random rigid pose plus Gaussian noise on six scalp fiducials.
 - The server checks a plan against the scene it was built from (the T1's sha256 recorded at build time, the voxel index recomputed from the original T1 matrix, RAS and LPS consistency). It does not re-hash the scan on disk.
-- The GUI suggests the map's peak; a person decides where the target goes. The whole-brain peak is not a reproducible target (M7): it often falls in the cerebellum or outside motor cortex. Only the cluster centre inside the hand area was reproducible, and that relies on an anatomical prior.
+- The GUI suggests the map's peak; a person decides where the target goes. The whole-brain peak is not a reproducible target (M7): it often falls in the cerebellum or outside motor cortex. The cluster centre inside the hand area was closer between one person's two days (median 3 mm) than between different people (median 10 mm), but that relies on an anatomical prior, and the region alone makes about half of all pairs land within 10 mm.
 - The pipeline refuses to build a planning scene when the template fit or the fMRI-to-T1 registration fails a plausibility check (brain volume and position; rotation and shift from the scanner's own alignment, boundary cost). The thresholds were set from this dataset.
 
 ## Running it
@@ -114,9 +114,9 @@ s2t/            dicom, volume, transforms, motion, glm, fmri, register (MI, SSD,
                 template, fiducials, robot, scene, serve, dicomweb, cli; viewer/ (HTML, JS)
 validation/     one script per bar
 tests/          unit tests, viewer orientation phantom
-scripts/        data download
+scripts/        data download, static copy of the planner for a website
 ```
 
 ## How this was made
 
-[Bilal: one or two sentences in your own words on your part.] Code and docs were written with Claude Opus 5.5 in Claude Code, and an independent review agent's 11 findings are listed with their fixes in RESULTS.md. Every number in RESULTS.md comes from a script in `validation/`.
+[Bilal: one or two sentences in your own words on your part.] Code and docs were written with Claude Opus 5.5 in Claude Code, and two independent review agents' findings (11, then 7) are listed with their fixes in RESULTS.md. Every number in RESULTS.md comes from a script in `validation/`.

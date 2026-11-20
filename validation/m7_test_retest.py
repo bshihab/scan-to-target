@@ -10,6 +10,10 @@ No pass bar (PLAN.md): this measures fMRI reproducibility more than software.
 Stated expectation before running: under 10 mm for most subjects.
 
 Usage: python validation/m7_test_retest.py [--delete-raw] sub-01 sub-02 ...
+       python validation/m7_test_retest.py --epi-loop-only
+         recomputes only B4e(2) for every row of out/m7.json from the files in
+         out/ (no raw data needed); the previous value is kept as
+         epi_loop_before_centre_fix.
 """
 import json
 import shutil
@@ -90,10 +94,15 @@ def t1_retest_to_test(t1_test, t1_retest, Nt, Nr):
 EPI_LOOP_MAX_MM = 2.0
 
 
-def epi_loop(sub, C, t1_test, Nt):
+def epi_loop(sub, C, Nr):
     """B4e(2): EPI_retest -> EPI_test -> T1_test against EPI_retest -> T1_retest
     -> T1_test. The EPI-to-EPI registration starts from identity and from the
-    brain-mask centroid offset, never from the matrices under test."""
+    brain-mask centroid offset, never from the matrices under test.
+
+    Both composed transforms act on retest-EPI points, so the 60 mm test sphere
+    is centred on MNI (0, -18, 18) carried into the retest frame (inv(Nr)).
+    Before the second review it was centred through inv(Nt), a test-T1 point
+    6 to 34 mm away; the 2026-11-19 numbers used that centre."""
     f = {ses: OUT / sub / f"ses-{ses}/fmri" for ses in ("test", "retest")}
     mt, mr = Volume.from_nifti(f["test"] / "mean_epi.nii.gz"), Volume.from_nifti(f["retest"] / "mean_epi.nii.gz")
     bt = Volume.from_nifti(f["test"] / "brain_mask.nii.gz").data > 0
@@ -105,10 +114,31 @@ def epi_loop(sub, C, t1_test, Nt):
     best = min(runs, key=lambda k: runs[k].cost)
     Dm = runs[best].matrix
     At, Ar = np.load(f["test"] / "epi_to_t1.npy"), np.load(f["retest"] / "epi_to_t1.npy")
-    pts = T.sphere_points(T.apply(np.linalg.inv(Nt), np.array([0.0, -18.0, 18.0])), 60.0, 64)
+    pts = T.sphere_points(T.apply(np.linalg.inv(Nr), np.array([0.0, -18.0, 18.0])), 60.0, 64)
     loop = T.transform_error_mm(At @ Dm, C @ Ar, pts)
     return {"max_mm": float(loop.max()), "mean_mm": float(loop.mean()), "start": best,
             "costs": {k: v.cost for k, v in runs.items()}, "passed": bool(loop.max() <= EPI_LOOP_MAX_MM)}
+
+
+def gate_summary(subs):
+    """B4e(1): tally the plausibility gates the pipeline recorded for each session."""
+    rows = []
+    for sub in subs:
+        for ses in ("test", "retest"):
+            f = OUT / sub / f"ses-{ses}"
+            if not (f / "t1_to_mni.json").exists() or not (f / "fmri/epi_to_t1.json").exists():
+                continue
+            m, e = json.loads((f / "t1_to_mni.json").read_text()), json.loads((f / "fmri/epi_to_t1.json").read_text())
+            rows.append((sub, ses, m, e))
+    if not rows:
+        return
+    ok = sum(bool(m.get("qc_ok")) and bool(e.get("qc_ok")) for _, _, m, e in rows)
+    second = [f"{s} {ses}" for s, ses, m, _ in rows if len(m.get("tried", [])) > 1]
+    print(f"B4e(1) gates: {ok}/{len(rows)} sessions pass both; boundary cost "
+          f"{min(e['bbr_cost'] for *_, e in rows):.3f}-{max(e['bbr_cost'] for *_, e in rows):.3f}; at most "
+          f"{max(e['rotation_from_scanner_deg'] for *_, e in rows):.1f} deg and "
+          f"{max(e['moved_from_scanner_max_mm'] for *_, e in rows):.1f} mm from the scanner alignment; "
+          f"template fits that needed a later start: {second or 'none'}")
 
 
 def process(sub, log=print):
@@ -134,7 +164,7 @@ def process(sub, log=print):
     C, res["t1_registration"] = t1_retest_to_test(t1_test, t1_retest, Nt, Nr)
     np.save(OUT / sub / "t1_retest_to_test.npy", C)
     res["t1_retest_to_test"] = C.tolist()
-    res["epi_loop"] = epi_loop(sub, C, t1_test, Nt)
+    res["epi_loop"] = epi_loop(sub, C, Nr)
     retest_in_test = T.apply(C, np.array(res["retest"]["peak_t1_ras"]))
     res["distance_mm"] = float(np.linalg.norm(retest_in_test - np.array(res["test"]["peak_t1_ras"])))
     if res["test"]["cluster_centroid_t1_ras"] and res["retest"]["cluster_centroid_t1_ras"]:
@@ -150,6 +180,18 @@ def main():
     delete_raw = "--delete-raw" in sys.argv
     out_file = OUT / "m7.json"
     rows = {r["subject"]: r for r in json.loads(out_file.read_text())["rows"]} if out_file.exists() else {}
+    if "--epi-loop-only" in sys.argv:
+        for sub, r in sorted(rows.items()):
+            if "epi_loop" not in r:
+                continue
+            Nr = np.load(OUT / sub / "ses-retest/t1_to_mni.npy")
+            C = np.load(OUT / sub / "t1_retest_to_test.npy")
+            assert np.allclose(C, np.array(r["t1_retest_to_test"])), sub
+            r.setdefault("epi_loop_before_centre_fix", r["epi_loop"])
+            r["epi_loop"] = epi_loop(sub, C, Nr)
+            print(f"{sub}: EPI loop {r['epi_loop']['max_mm']:.2f} mm (was {r['epi_loop_before_centre_fix']['max_mm']:.2f})", flush=True)
+        out_file.write_text(json.dumps({"rows": sorted(rows.values(), key=lambda r: r["subject"])}, indent=2))
+        args = []
     for sub in args:
         try:
             rows[sub] = process(sub)
@@ -168,6 +210,7 @@ def main():
     bad = [r["subject"] for r in rows.values() if "distance_mm" in r and not r.get("t1_registration", {}).get("loop_ok")]
     if bad:
         print("excluded, T1-to-T1 loop check failed:", ", ".join(bad))
+    gate_summary(sorted(rows))
     loops = [r for r in rows.values() if "epi_loop" in r]
     print(f"B4e(2) EPI loop closure <= {EPI_LOOP_MAX_MM} mm: {sum(r['epi_loop']['passed'] for r in loops)}/{len(loops)}; "
           f"subjects with errors: {[r['subject'] for r in rows.values() if 'error' in r]}")
