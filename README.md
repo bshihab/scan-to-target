@@ -119,4 +119,4 @@ scripts/        data download, static copy of the planner for a website
 
 ## How this was made
 
-[Bilal: one or two sentences in your own words on your part.] Code and docs were written with Claude Opus 5.5 in Claude Code, and two independent review agents' findings (11, then 7) are listed with their fixes in RESULTS.md. Every number in RESULTS.md comes from a script in `validation/`.
+I picked the problem and ran the Google Cloud test under my own account. Code and docs were written with Claude Opus 5.5 in Claude Code, and two independent review agents' findings (11, then 7) are listed with their fixes in RESULTS.md. Every number in RESULTS.md comes from a script in `validation/`.

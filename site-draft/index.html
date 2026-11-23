@@ -38,7 +38,7 @@
 
   <section class="story">
     <h2>Why I built it</h2>
-    <p>[Bilal: one or two sentences in your own words. For example what drew you to surgical planning, and that in January 2025 you had written a small DICOM upload tool for Google Cloud and wanted to go from storing scans to using their geometry.]</p>
+    <p>In January 2025 I wrote a small tool that uploaded medical scans to Google Cloud. It stored the files but never used what was inside them: where each voxel sits in the patient. This project is the step after storage, from the scanner's files to a point a surgical robot could aim for, with every stage checked against tools I didn't write.</p>
     <h2>How it works</h2>
     <p>Every image is an array plus one 4x4 matrix that maps voxel indices to millimetres in the scanner's frame. DICOM stores that geometry in its own patient frame (x to the patient's left, y to the back), NIfTI in the opposite sign for x and y, and most bugs in this kind of software come from mixing them. Every point in a plan carries the name of its frame.</p>
     <p>The fMRI goes through motion correction, then a general linear model that compares finger blocks against the foot and lips blocks. The fMRI is registered to the anatomical scan by boundary-based registration (the method behind FreeSurfer's bbregister): it finds the white-matter surface in the anatomy and turns the fMRI until the grey/white contrast lines up along the whole surface. It starts twice, from the scanner's own alignment and from a mutual-information fit, and keeps the better answer. A template brain from MNI gives a brain mask and approximate MNI coordinates for each point.</p>
